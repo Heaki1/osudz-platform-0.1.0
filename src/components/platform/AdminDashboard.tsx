@@ -1652,9 +1652,6 @@ function BeatmapRulesTab() {
 // The bounty textarea is gone: E4 made the prize a per-round field set when a round is opened,
 // so a second place to type it that saved nothing was a duplicate of a control that works.
 
-/** The full mod set an administrator picks from. Editing beyond this is not asked for. */
-const ALL_MODS = ['NM', 'HD', 'HR', 'DT', 'EZ', 'FL', 'HDHR', 'HDDT', 'HRDT'];
-
 /**
  * Challenge types whose NAME carries behaviour. repo/challengeScores.ts switches on these
  * strings in qualifies() and orderFor(), so renaming one silently stops it being judged — the
@@ -1668,6 +1665,7 @@ function ChallengeTab() {
 
   const [mods, setMods] = useState<string[]>([]);
   const [types, setTypes] = useState<string[]>([]);
+  const [newMod, setNewMod] = useState('');
   const [newType, setNewType] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -1677,8 +1675,17 @@ function ChallengeTab() {
     setTypes(settings.allowedChallengeTypes);
   }, [settings]);
 
-  const toggleMod = (m: string) =>
-    setMods((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]));
+  // Mirrors addType below. Uppercased because every osu! mod acronym is
+  // conventionally upper case (HD, DT, HDDT…) and the submit page's mod
+  // picker and this list need to compare equal, not differ by case.
+  const addMod = () => {
+    const name = newMod.trim().toUpperCase();
+    if (name === '' || mods.includes(name)) return;
+    setMods((prev) => [...prev, name]);
+    setNewMod('');
+  };
+
+  const removeMod = (m: string) => setMods((prev) => prev.filter((x) => x !== m));
 
   const addType = () => {
     const name = newType.trim();
@@ -1709,21 +1716,46 @@ function ChallengeTab() {
 
       <Section title="Allowed Mods" description="Players choose from these when submitting a beatmap.">
         <div className="flex flex-wrap gap-2">
-          {ALL_MODS.map((m) => (
-            <button
+          {mods.map((m) => (
+            <div
               key={m}
-              type="button"
-              onClick={() => toggleMod(m)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border transition-all ${
-                mods.includes(m)
-                  ? 'bg-indigo-500/25 border-indigo-500/50 text-indigo-200'
-                  : 'bg-slate-900/50 border-slate-700/60 text-slate-600 hover:text-slate-400'
-              }`}
+              className="flex items-center gap-1.5 bg-slate-900/40 border border-slate-800 rounded-lg pl-3 pr-2 py-1.5"
             >
-              {m}
-            </button>
+              <span className="text-xs font-mono font-bold text-white">{m}</span>
+              <button
+                type="button"
+                onClick={() => removeMod(m)}
+                className="text-slate-600 hover:text-rose-400 transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
           ))}
         </div>
+        <div className="flex gap-2 mt-3">
+          <input
+            type="text"
+            placeholder="New mod acronym (e.g. HDDT)…"
+            value={newMod}
+            onChange={(e) => setNewMod(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') addMod();
+            }}
+            className="flex-1 bg-slate-900/60 border border-slate-700 focus:border-amber-400/50 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none transition-colors font-mono"
+          />
+          <button
+            type="button"
+            onClick={addMod}
+            className="flex items-center gap-1.5 px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-black rounded-xl transition-all"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add
+          </button>
+        </div>
+        <p className="text-[11px] text-slate-500 mt-2">
+          Type any mod acronym combination (NM, HD, HR, DT, HDDT, HDHR, HDDTHR…) and press Add or
+          Enter. The submit page offers exactly this list to players.
+        </p>
       </Section>
 
       <Section title="Challenge Types" description="The requirement a submitter picks alongside the mod.">
