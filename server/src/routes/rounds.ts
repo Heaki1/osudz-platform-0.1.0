@@ -13,6 +13,7 @@ import {
 } from '../repo/rounds.js';
 import { findById as findSubmission, toApiSubmission } from '../repo/submissions.js';
 import { listForRound, toApiChallengeScore } from '../repo/challengeScores.js';
+import { frozenDzpp } from '../repo/dzpp.js';
 
 const router = Router();
 
@@ -37,7 +38,11 @@ function dbDown(res: Response, err: unknown, where: string): void {
  * ordering rather than a second one in JavaScript that could drift from it. The archive
  * holds one row per month the community has run, so the count is small and bounded.
  */
-async function toRoundDetail(row: RoundRow, participants: number) {
+async function toRoundDetail(
+  row: RoundRow,
+  participants: number,
+  frozen: Map<number, number>
+) {
   const winner =
     row.winning_submission_id === null ? null : await findSubmission(row.winning_submission_id);
 
@@ -46,7 +51,14 @@ async function toRoundDetail(row: RoundRow, participants: number) {
   return {
     ...toApiRound(row),
     winner: winner ? toApiSubmission(winner) : null,
-    leaderboard: scores.map((score, i) => toApiChallengeScore(score, i + 1)),
+    // THE FROZEN VALUES, read from round_dzpp rather than recomputed. An ended round's DZPP is
+    // what was stored when it closed; re-deriving it here would put a second answer on the
+    // archive that could disagree with the ranking. A round with nothing frozen — an open one,
+    // or one that ended before the pipeline existed — reads null, which the page shows as a dash
+    // rather than as a zero.
+    leaderboard: scores.map((score, i) =>
+      toApiChallengeScore(score, i + 1, frozen.get(score.user_id) ?? null)
+    ),
     participants,
   };
 }
@@ -69,9 +81,13 @@ router.get('/current', async (_req, res) => {
 router.get('/', async (_req, res) => {
   try {
     const rows = await listAll();
-    const counts = await participantCounts(rows.map((row) => row.id));
+    const ids = rows.map((row) => row.id);
+    // Both are one query for the whole archive rather than one per round.
+    const [counts, frozen] = await Promise.all([participantCounts(ids), frozenDzpp(ids)]);
     const detailed = await Promise.all(
-      rows.map((row) => toRoundDetail(row, counts.get(row.id) ?? 0))
+      rows.map((row) =>
+        toRoundDetail(row, counts.get(row.id) ?? 0, frozen.get(row.id) ?? new Map())
+      )
     );
     res.json(detailed);
   } catch (err) {
@@ -93,8 +109,13 @@ router.get('/:id', async (req, res) => {
       return;
     }
 
-    const counts = await participantCounts([row.id]);
-    res.json(await toRoundDetail(row, counts.get(row.id) ?? 0));
+    const [counts, frozen] = await Promise.all([
+      participantCounts([row.id]),
+      frozenDzpp([row.id]),
+    ]);
+    res.json(
+      await toRoundDetail(row, counts.get(row.id) ?? 0, frozen.get(row.id) ?? new Map())
+    );
   } catch (err) {
     dbDown(res, err, 'get');
   }

@@ -21,6 +21,7 @@ const LANDING_LABEL: Record<PlatformPage, string> = {
   submit: 'Go to Submit',
   vote: 'Go to Vote',
   search: 'Go to Search',
+  rankings: 'Go to Rankings',
   admin: 'Go to Admin',
   archive: 'Go to Archive',
 };

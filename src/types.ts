@@ -7,7 +7,14 @@
 
 export type Phase = 'submission' | 'voting' | 'challenge';
 export type BeatmapStatus = 'ranked' | 'loved' | 'approved';
-export type PlatformPage = 'dashboard' | 'submit' | 'vote' | 'search' | 'admin' | 'archive';
+export type PlatformPage =
+  | 'dashboard'
+  | 'submit'
+  | 'vote'
+  | 'search'
+  | 'rankings'
+  | 'admin'
+  | 'archive';
 
 export interface BeatmapComment {
   id: string;

@@ -10,11 +10,23 @@
 # G1 (the osu! application) and H6 (the voting happy path) — so nothing in A-H is waiting on
 # code, on a decision, or on a migration.
 #
-# ONE NEW SECTION IS OPEN, AND IT IS NOT APPROVED YET: I. RANKING. The owner specified an
-# Algeria-only ranking page whose points are earned from the monthly challenges alone, and
-# asked for the formula to be proposed before anything is built. Three items, I1-I3, all
-# AWAITING APPROVAL. Do not write code for them until the owner approves the formula in
-# that section: my_plan.txt:950 says ask rather than invent, and section I is that ask.
+# SECTION I. RANKING IS NOW APPROVED AND BUILT. The owner approved a formula on 2026-09-05 —
+# NOT the one section I originally proposed. DZ Performance Points are osu! pp for the play plus
+# completion, qualification and a field-factored placement award, and the accuracy term, the
+# star-rating multiplier, the winner bonus and the FC bonus that section I proposed were all
+# dropped, because osu! pp already prices them. The frozen specification is
+# docs/superpowers/specs/2026-09-05-dzpp-design.md and it, not section I, is the authority.
+#
+# NINE PHASES SHIPPED: the pure engine, migrations 013 and 014, finalization on every path that
+# ends a round, the public rankings API, the rankings page and player panel, per-round admin
+# recompute with an audit table, an end-to-end verification script, and polish. Rounds 5 and 6
+# have finalized for real and the ranking reads 552 DZPP for Heaki over two rounds.
+#
+# ONE FINDING IS OPEN AND DELIBERATELY UNFIXED: round 1 (id 3) ended with a challenge score
+# before the pipeline existed, so it holds no frozen DZPP. The owner chose not to repair it —
+# the development database is disposable and will be wiped before production. The Phase 7
+# recompute is the remedy when it matters; note the play's pp is NULL, so it would need
+# re-importing first to be worth more than 41.
 
   LAST CODE 0aa4c88 "feat: let an admin skip a voting phase with no ballot"
   HEAD      the docs commit carrying this checkpoint, which cannot name its own hash.
@@ -54,8 +66,9 @@
      also runs the C5 challenge rule end to end: partial block, full block, full grant,
      restore.
 
-  2  APPROVE OR REDIRECT THE RANKING FORMULA in section I below. It is the only thing on
-     this roadmap that is not settled, and no code may be written for it first. The section
+  2  (CLOSED 2026-09-05.) The ranking formula was approved, and not as section I proposed —
+     see the checkpoint above and the frozen specification. What follows is the original
+     proposal, kept as a record of what was asked and answered. It formerly read: the section
      proposes the point formula, the cumulative structure and the page, and ends with five
      numbered questions the owner has to answer — the largest being whether points are
      frozen per round in a new table (which needs migration 013, so the owner applies it)
@@ -65,8 +78,8 @@
 
 ## ITEM STATUS — 52 items
 
-  47 DONE · 0 TODO · 0 IN PROGRESS · 0 BLOCKED · 1 DECIDED · 1 NOT ASKED
-  · 3 AWAITING APPROVAL
+  50 DONE · 0 TODO · 0 IN PROGRESS · 0 BLOCKED · 1 DECIDED · 1 NOT ASKED
+  · 0 AWAITING APPROVAL
 
   A. SUBMISSION      A1-A5 DONE
   B. VOTING          B1-B12 DONE
@@ -76,7 +89,9 @@
   F. ARCHIVE         F1 DONE   F2 DONE
   G. OAUTH/SECURITY  G1-G6 DONE
   H. TESTING/CLEANUP H1-H6 DONE
-  I. RANKING         I1-I3 AWAITING APPROVAL — proposed, not built, not decided
+  I. RANKING         I1-I3 DONE — approved 2026-09-05 with a DIFFERENT formula from the one
+                     proposed below, built across nine phases, verified end to end. The
+                     authority is docs/superpowers/specs/2026-09-05-dzpp-design.md.
 
   Each item's own entry below carries its full WHAT / WHY / DEPS / VERIFY, what
   landed, and every decision recorded against it. This table is only the index.
@@ -230,9 +245,11 @@
 ## KNOWN ISSUES AND WHAT NEEDS THE OWNER
 
   NEEDS THE OWNER
-    1  APPROVE OR REDIRECT SECTION I. The ranking page is specified but its formula is not
-       agreed, and five numbered questions at the end of that section are waiting. This is the
-       only thing on the roadmap that blocks work, and it blocks all three of I1-I3.
+    1  (CLOSED 2026-09-05.) Section I was approved with a revised formula and is built. One
+       finding is knowingly left alone: round 1 (id 3) ended before the pipeline existed and
+       holds no frozen DZPP. Repairing it needs the score re-imported first, because its pp is
+       NULL — and the owner chose not to, since this database is wiped before production.
+       cd server && pnpm run dzpp:verify names it on every run.
     2  node verify-authenticated.mjs, at the top of this file. The only part of the
        verification a session here cannot reach. A standing re-run, not an open task.
        (Migration 012 was item 3 here, and G1 was item 1. Both closed 2026-09-05 — G1 on the
@@ -321,15 +338,16 @@
 
 ## COMMANDS FOR TOMORROW
 
-  From C:\Users\heaki\Desktop\newdz
+  From C:\Users\heaki\Desktop\osudzpp   (the project was renamed from newdz)
 
     git log -1 --oneline          # a docs commit on top of 0aa4c88
     git status --short            # expect empty
     npm run typecheck             # client
     cd server && npm run typecheck && cd ..
-    npm test                      # expect 43 + 62 passing
+    npm test                      # expect 59 client + 125 server passing
     npm run build
-    cd server && pnpm run migrate:status   # expect 12 applied, 0 pending
+    cd server && pnpm run migrate:status   # expect 14 applied, 0 pending
+    cd server && pnpm run dzpp:verify      # DZPP invariants, read-only, expect 0 failed
 
   To bring the app up, if it is not already running:
     cd server && pnpm run dev     # API on :3001
@@ -2123,7 +2141,31 @@ fix it as its own item with its own commit.
              "Vote cast" pill appear; move the vote; retract it.
 
 
-# I. RANKING   ← SPECIFIED BY THE OWNER 2026-09-05. NOTHING HERE IS APPROVED YET.
+# I. RANKING   ← APPROVED AND BUILT 2026-09-05. WITH A DIFFERENT FORMULA FROM THE ONE BELOW.
+#
+#   THE AUTHORITY IS docs/superpowers/specs/2026-09-05-dzpp-design.md, NOT THIS SECTION.
+#
+#   What was approved: finalDzpp = round(osu! pp for the play + 10 completion + 25 qualification
+#   + placement), where placement is a table (50/40/30/25/20/15/10/5, nothing from 9th) times a
+#   field factor of min(1, qualifiedPlayers / 8). The accuracy term, the star-rating multiplier,
+#   the winner bonus and the FC bonus proposed below were ALL DROPPED — osu! pp already prices
+#   star rating, accuracy, misses and combo, and layering a second one was the thing the owner
+#   ruled out. 1/sqrt(r) placement decay was replaced by the flat table.
+#
+#   What shipped, in nine phases: server/src/repo/dzpp.ts (the pure engine, then the table
+#   access), migration 013_round_dzpp.sql (challenge_scores.pp, rounds.dzpp_finalized_at,
+#   round_dzpp), finalization on all three paths that write phase = 'ended',
+#   server/src/routes/rankings.ts, src/components/platform/RankingsPage.tsx and
+#   PlayerRankingDetail.tsx, a DZPP column on both the live and archived challenge leaderboards,
+#   migration 014_dzpp_recomputes.sql with POST /api/admin/dzpp/recompute, and
+#   server/src/scripts/verify-dzpp.ts.
+#
+#   The five questions at the end of this section were all answered, and Q1 was answered the
+#   OTHER way: the ranking filters DZ itself through a RANKING_COUNTRY constant rather than
+#   following allowed_countries, because the owner's roadmap says no other country appears in it.
+#
+#   EVERYTHING BELOW IS THE ORIGINAL PROPOSAL, kept as the record of what was asked. Do not
+#   implement from it.
 
   The owner asked for an Algeria-only performance ranking page, modelled on
   https://osu.ppy.sh/rankings/osu/global but with its own point system: points earned
@@ -2222,7 +2264,13 @@ fix it as its own item with its own commit.
 
   ── THE ITEMS ──────────────────────────────────────────────────────────────
 
-  I1  Ranking points, computed per round and frozen        [AWAITING APPROVAL]
+  I1  Ranking points, computed per round and frozen        [DONE — REVISED FORMULA]
+      LANDED  server/src/repo/dzpp.ts, pure half first (DZPP_FORMULA_VERSION, COMPLETION_POINTS,
+              QUALIFICATION_POINTS, PLACEMENT_TABLE, FIELD_FACTOR_TARGET, fieldFactor,
+              basePlacementPoints, placementPoints, scoreOne, scoreRound) with 32 unit tests, then
+              migration 013_round_dzpp.sql and finalizeRound/freezeEndedRound wired into all three
+              paths that write phase = 'ended'. NOT the formula proposed below — see the section
+              header. The WHAT/WHY that follows is the original proposal.
       WHAT   A pure scoring module — server/src/repo/rankingPoints.ts — holding the formula
              above as functions over their inputs, in the style of refuseSkipVoting and
              checkBeatmapRules: roundPoints(play, context) taking the play, the field size,
@@ -2262,7 +2310,13 @@ fix it as its own item with its own commit.
                 Note the checksum lock (scripts/migrate.ts:76-80): once applied the file can
                 never be edited, so anything found wrong afterwards becomes 014.
 
-  I2  The Algeria-only rankings page                      [AWAITING APPROVAL]
+  I2  The Algeria-only rankings page                      [DONE]
+      LANDED  server/src/routes/rankings.ts (GET /api/rankings and /api/rankings/:userId, public),
+              the client seam in src/api/client.ts, src/components/platform/RankingsPage.tsx and
+              PlayerRankingDetail.tsx from the owner's Figma Make design, a Rankings nav entry, and
+              30 checks in verify-public.mjs. Pagination is 50 to a page in an envelope carrying
+              total and years; the search field filters the loaded page, which is honest while the
+              whole table fits one response.
       WHAT   GET /api/rankings?season=&page= — public, no session, paginated 50 to a page,
              returning rank, user, points, rounds played, average accuracy, first places and
              best placement. Then src/components/platform/RankingsPage.tsx laid out like
@@ -2288,7 +2342,13 @@ fix it as its own item with its own commit.
              5 COMMIT    "feat: an Algeria-only challenge ranking page"
              6 VERIFY    git log -1 --stat; git status --short clean
 
-  I3  Admin recompute, and the audit that goes with it    [AWAITING APPROVAL]
+  I3  Admin recompute, and the audit that goes with it    [DONE]
+      LANDED  migration 014_dzpp_recomputes.sql, recomputeRound + refuseRecompute + listRecomputes
+              in repo/dzpp.ts, POST /api/admin/dzpp/recompute and GET /api/admin/dzpp/recomputes,
+              and a DzppRecomputePanel on the admin config tab. ONE ROUND PER CALL, no bulk form,
+              a reason of at least ten characters required, and the rewrite plus its audit row in
+              one transaction. It also covers a round that was never finalized, so there is no
+              second endpoint for that. Verified live: round 5 rescored 366 -> 366, formula v1.
       WHAT   An admin-only POST that recomputes a round's frozen points, or every round's,
              writing what changed rather than overwriting silently. One new admin panel row.
       WHY    Freezing is right and it has one cost: a formula the owner tunes in month five
@@ -2309,7 +2369,24 @@ fix it as its own item with its own commit.
              5 COMMIT    "feat: recompute ranking points, with an audit row"
              6 VERIFY    git log -1 --stat; git status --short clean
 
-  ── THE FIVE QUESTIONS. NO CODE UNTIL THESE ARE ANSWERED. ──────────────────
+  ── THE FIVE QUESTIONS — ALL ANSWERED 2026-09-05 ───────────────────────────
+
+  Q1 answered (b), NOT the recommendation: DZ is filtered directly, through RANKING_COUNTRY in
+     repo/dzpp.ts, because the owner's roadmap says no other country appears in the ranking.
+     Frozen rows are still written for every player who played, whatever their country, so the
+     field factor and the placements describe the field that actually competed and changing the
+     display filter later needs no recompute.
+  Q2 answered as recommended: all-time is the default view and a year selector sits beside it,
+     driven by the seasons that actually hold DZPP rather than by rounds.year alone.
+  Q3 answered (a) as recommended: frozen in round_dzpp, one row per player per round, written
+     when the round reaches phase = 'ended'.
+  Q4 answered (a) as recommended: the constants live in code, versioned by DZPP_FORMULA_VERSION,
+     and a deliberate recompute is the only way a frozen round changes.
+  Q5 answered as recommended: a non-qualifying play earns the 10-point completion award and no
+     placement. Its osu! pp still counts, which the revised formula makes a larger share than the
+     original proposal would have.
+
+  ── THE ORIGINAL WORDING OF THOSE QUESTIONS ────────────────────────────────
 
   Q1  WHO APPEARS?  The owner said Algerian users only, no other countries. But C4 replaced
       the hardcoded ELIGIBLE_COUNTRY = 'DZ' with the allowed_countries table precisely so the
@@ -2523,7 +2600,8 @@ back by accident.
     all, on purpose: B11 made ballot secrecy a rule and paying for votes would make the
     ballot the thing worth farming.
   - ranking systems the owner did not specify — STILL BANNED. Section I is the exception that
-    proves the rule: an Algeria-only, challenge-only cumulative ranking is now specified in
+    proves the rule, and it is now BUILT rather than merely specified: an Algeria-only,
+    challenge-only cumulative ranking is specified in
     writing. Anything past what I1-I3 describe is still invention, and the five questions at
     the end of that section are the parts the owner has not answered yet.
   - vote weighting by osu! rank — users.global_rank is display-only

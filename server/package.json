@@ -11,7 +11,8 @@
     "test": "npm --prefix .. run test:server",
     "db:check": "tsx src/scripts/check-db.ts",
     "migrate": "tsx src/scripts/migrate.ts",
-    "migrate:status": "tsx src/scripts/migrate.ts --status"
+    "migrate:status": "tsx src/scripts/migrate.ts --status",
+    "dzpp:verify": "tsx src/scripts/verify-dzpp.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

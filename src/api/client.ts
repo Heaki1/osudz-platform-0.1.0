@@ -63,6 +63,11 @@ export interface ApiRound {
   /** Votes cast in the round, frozen alongside winnerVoteCount. */
   totalVotes: number | null;
   winnerApprovedAt: string | null;
+  /**
+   * When this round's DZPP was frozen, or null when it never was — the admin recompute panel
+   * needs to tell "scored" from "never scored", and a round can be finalized to zero rows.
+   */
+  dzppFinalizedAt: string | null;
 }
 
 /**
@@ -185,9 +190,83 @@ export interface ApiChallengeScore {
   /** Joined acronyms ('HDHR'), or 'NM'. */
   mods: string;
   qualified: boolean;
+  /**
+   * DZPP this play is worth as the round stands, or null when the read could not know it —
+   * a single-score read has no field size, and an archived round's real answer is the frozen
+   * row rather than a recomputation.
+   *
+   * PROVISIONAL while the challenge is open: placement and the field factor both move as
+   * scores arrive. The server computes it with the same engine that freezes round_dzpp, so it
+   * is never a second formula.
+   */
+  dzpp: number | null;
   /** Null when an administrator entered this by hand rather than importing it. */
   osuScoreId: number | null;
   submittedAt: string;
+}
+
+/**
+ * One row of the DZ Performance Rankings.
+ *
+ * Algeria only. The filter runs inside the query in server/src/repo/dzpp.ts, so a player
+ * outside the ranking never reaches this shape at all.
+ */
+export interface ApiRankingEntry {
+  /** Shared by players level on points, the way osu!'s own rankings do it. */
+  rank: number;
+  userId: number;
+  osuId: number;
+  username: string;
+  avatarUrl: string;
+  country: string;
+  /** Cumulative DZPP — a plain sum of every frozen round in the selected period. */
+  dzpp: number;
+  roundsPlayed: number;
+  firstPlaces: number;
+  /** Null for a player who has never qualified in a counted round. */
+  bestPlacement: number | null;
+}
+
+/**
+ * A page of the ranking.
+ *
+ * An envelope rather than the bare array every other read here returns, because a bare array
+ * cannot carry the total, and a pager that does not know how many pages exist is a pager that
+ * guesses.
+ */
+export interface ApiRankingPage {
+  page: number;
+  pageSize: number;
+  /** Players in the whole filtered table, not on this page. */
+  total: number;
+  /** Seasons that actually hold DZPP, newest first — the year selector's options. */
+  years: number[];
+  entries: ApiRankingEntry[];
+}
+
+/**
+ * One frozen round in a player's DZPP history, with the whole breakdown.
+ *
+ * The terms travel with the total on purpose: a table of totals with no visible derivation is
+ * a table people argue with rather than chase.
+ */
+export interface ApiPlayerDzppRound {
+  roundId: number;
+  roundNumber: number;
+  month: string;
+  year: number;
+  /** osu! pp for the play. Null when osu! reported none — a Loved map, or unranked mods. */
+  performanceValue: number | null;
+  completionPoints: number;
+  qualificationPoints: number;
+  /** Already multiplied by the field factor. */
+  placementPoints: number;
+  /** Null when the play did not qualify — only qualified players are placed. */
+  placement: number | null;
+  qualified: boolean;
+  /** Qualified players in the round: the field factor's input. */
+  fieldSize: number;
+  finalDzpp: number;
 }
 
 /**
@@ -358,6 +437,42 @@ export interface ApiAdminConfig {
  * The only way a recorded winner ever changes. Append-only: the previous entry stays named
  * here rather than being overwritten, so a round corrected twice keeps both steps.
  */
+/**
+ * One audited DZPP recompute of one round.
+ *
+ * Append-only on the server: a row records what a round used to be worth so the change stays
+ * legible, which is the whole reason freezing a round is safe.
+ */
+export interface ApiDzppRecompute {
+  id: number;
+  roundId: number;
+  roundNumber: number;
+  previousRows: number;
+  newRows: number;
+  previousTotal: number;
+  newTotal: number;
+  /** Null when the round had never been scored — a missed finalization, not a rescore. */
+  previousFormulaVersion: number | null;
+  newFormulaVersion: number;
+  reason: string;
+  recomputedBy: number | null;
+  recomputedByName: string | null;
+  recomputedAt: string;
+}
+
+/** What a recompute changed, returned by the write itself. */
+export interface ApiDzppRecomputeSummary {
+  roundId: number;
+  previousRows: number;
+  newRows: number;
+  previousTotal: number;
+  newTotal: number;
+  previousFormulaVersion: number | null;
+  newFormulaVersion: number;
+  /** True when the round held no frozen rows at all before the call. */
+  firstTime: boolean;
+}
+
 export interface ApiResultCorrection {
   id: number;
   roundId: number;
@@ -507,6 +622,26 @@ export const api = {
       send<{ ok: boolean; score: ApiChallengeScore }>("POST", "/challenge/scores"),
   },
 
+  // ── Rankings ───────────────────────────────────────────────────────────────
+  rankings: {
+    /**
+     * A page of the DZ Performance Rankings. Omit `year` for all-time, which is the default
+     * view; omit `page` for the first page.
+     */
+    list: (params: { year?: number; page?: number } = {}) => {
+      const query = new URLSearchParams();
+      if (params.year !== undefined) query.set("year", String(params.year));
+      if (params.page !== undefined) query.set("page", String(params.page));
+      const suffix = query.toString();
+      return get<ApiRankingPage>(suffix === "" ? "/rankings" : `/rankings?${suffix}`);
+    },
+    /** One player's frozen rounds, newest first. [] when they have none counted. */
+    player: (userId: number, year?: number) =>
+      get<ApiPlayerDzppRound[]>(
+        year === undefined ? `/rankings/${userId}` : `/rankings/${userId}?year=${year}`
+      ),
+  },
+
   // ── Search ────────────────────────────────────────────────────────────────────
   search: {
     /**
@@ -517,11 +652,26 @@ export const api = {
      * limited, osu! unavailable, and simply no matches — and get()'s `null` collapses
      * all four into the last one, which is the only one that is not an error.
      */
-    beatmaps: (params: { q: string; status: MapStatus | "any"; sort: "stars" | "bpm" }) =>
-      send<{ results: ApiSearchHit[] }>(
-        "GET",
-        `/search/beatmaps?${new URLSearchParams(params).toString()}`
-      ),
+    beatmaps: (params: {
+      q?: string;
+      /** A mapper name. The server turns it into osu!'s own creator clause. */
+      mapper?: string;
+      status?: MapStatus | "any";
+      sort?: "relevance" | "newest" | "stars" | "bpm";
+      minStars?: number;
+      maxStars?: number;
+      minBpm?: number;
+      maxBpm?: number;
+    }) => {
+      // Built key by key rather than handed straight to URLSearchParams: an absent bound must not
+      // travel as the string "undefined", which the server would refuse as a bad number.
+      const query = new URLSearchParams();
+      for (const [key, value] of Object.entries(params)) {
+        if (value === undefined || value === "") continue;
+        query.set(key, String(value));
+      }
+      return send<{ results: ApiSearchHit[] }>("GET", `/search/beatmaps?${query.toString()}`);
+    },
   },
 
   // ── Favorites ──────────────────────────────────────────────────────────────
@@ -637,6 +787,26 @@ export const api = {
      */
     correctWinner: (submissionId: number, reason: string) =>
       send<{ ok: boolean; round: ApiRound }>("POST", "/admin/round/correction", { submissionId, reason }),
+    /** One round's DZPP recompute history, newest first. roundId is required — see below. */
+    dzppRecomputes: (roundId: number) =>
+      get<ApiDzppRecompute[]>(`/admin/dzpp/recomputes?roundId=${roundId}`),
+    /**
+     * Rescores ONE ended round and records what changed.
+     *
+     * The round id is required and there is no bulk form on purpose: a single call that
+     * rewrote every historical round would be one mistake away from reshaping the whole
+     * leaderboard, and no audit row can undo that. The reason is required and stored.
+     *
+     * It rescores the plays AS STORED, through the same engine that froze them — so it
+     * reflects a changed constant or a fixed bug, never a changed play. It also covers a round
+     * that was never finalized at all, which is why there is no second endpoint for that.
+     */
+    recomputeDzpp: (roundId: number, reason: string) =>
+      send<{ ok: boolean; summary: ApiDzppRecomputeSummary }>(
+        "POST",
+        "/admin/dzpp/recompute",
+        { roundId, reason }
+      ),
     /** Read-only server configuration — what is set, never the secrets themselves. */
     config: () => get<ApiAdminConfig>("/admin/config"),
     /** The submission rules, with who last changed them. */

@@ -33,12 +33,13 @@ function LeaderboardSnapshot({ entries }: { entries: ApiChallengeScore[] }) {
       <div className="px-4 py-2.5 bg-slate-900/60 border-b border-slate-800/60 flex items-center gap-2">
         <Trophy className="w-3.5 h-3.5 text-amber-400" />
         <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Challenge Leaderboard</span>
+        <span className="ml-auto text-[10px] font-mono uppercase tracking-widest text-amber-400/70">DZPP</span>
       </div>
       <div className="divide-y divide-slate-800/40">
         {entries.map((e) => (
           <div
             key={e.userId}
-            className={`flex items-center gap-3 px-4 py-2.5 text-xs ${
+            className={`flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 text-xs ${
               e.rank === 1 ? 'bg-amber-400/5' : ''
             }`}
           >
@@ -59,18 +60,39 @@ function LeaderboardSnapshot({ entries }: { entries: ApiChallengeScore[] }) {
                 {e.username.slice(0, 1).toUpperCase()}
               </div>
             )}
-            <span className="flex-1 font-bold text-white truncate">{e.username}</span>
-            <span className="font-mono text-slate-300 w-24 text-right flex-shrink-0">{e.score.toLocaleString()}</span>
-            <span className="font-mono text-slate-500 w-14 text-right flex-shrink-0">{e.accuracy.toFixed(1)}%</span>
-            <span className={`font-mono w-10 text-right flex-shrink-0 ${e.misses === 0 ? 'text-emerald-400 font-bold' : 'text-slate-600'}`}>
+            {/* Below lg the numeric columns fold under the name, the way the live leaderboard
+                does — the same facts one line down rather than fewer facts clipped off. */}
+            <div className="flex-1 min-w-0">
+              <span className="block font-bold text-white truncate">{e.username}</span>
+              <span className="lg:hidden block text-[10px] font-mono text-slate-500 truncate">
+                {e.score.toLocaleString()} · {e.accuracy.toFixed(1)}% ·{' '}
+                <span className={e.misses === 0 ? 'text-emerald-400' : 'text-slate-600'}>{e.misses}×</span>
+                {' · '}{e.mods}
+              </span>
+            </div>
+            {/* THE FROZEN value from round_dzpp, not a recomputation — an ended round keeps the
+                DZPP it awarded. A dash means nothing was ever frozen for this play: an open
+                round, or one that ended before the pipeline existed. */}
+            <span className="w-16 text-right flex-shrink-0 tabular-nums">
+              {e.dzpp === null ? (
+                <span className="font-mono text-slate-700">—</span>
+              ) : (
+                <span className={`font-mono font-black ${e.qualified ? 'text-amber-400' : 'text-amber-400/50'}`}>
+                  {e.dzpp.toLocaleString()}
+                </span>
+              )}
+            </span>
+            <span className="hidden lg:block font-mono text-slate-300 w-24 text-right flex-shrink-0">{e.score.toLocaleString()}</span>
+            <span className="hidden lg:block font-mono text-slate-500 w-14 text-right flex-shrink-0">{e.accuracy.toFixed(1)}%</span>
+            <span className={`hidden lg:block font-mono w-10 text-right flex-shrink-0 ${e.misses === 0 ? 'text-emerald-400 font-bold' : 'text-slate-600'}`}>
               {e.misses}×
             </span>
-            <span className="w-12 text-right flex-shrink-0">
+            <span className="hidden lg:block w-12 text-right flex-shrink-0">
               <span className="text-[10px] font-mono font-bold bg-slate-800 border border-slate-700 px-1.5 py-0.5 rounded text-slate-300">
                 {e.mods}
               </span>
             </span>
-            <div className="w-24 flex justify-end flex-shrink-0">
+            <div className="hidden sm:flex w-24 justify-end flex-shrink-0">
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${
                 e.qualified
                   ? 'bg-emerald-500/15 border-emerald-500/25 text-emerald-400'

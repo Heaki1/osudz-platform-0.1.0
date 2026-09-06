@@ -20,6 +20,7 @@ import {
   toApiChallengeScore,
   upsert,
 } from '../repo/challengeScores.js';
+import { scoreRound, toRoundPlay } from '../repo/dzpp.js';
 import { ScoreNotFound, fetchUserScore } from '../services/osu.js';
 
 const router = Router();
@@ -80,7 +81,15 @@ router.get('/scores', async (req, res) => {
       context.round.id,
       context.winner?.challenge_requirement ?? ''
     );
-    res.json(rows.map((row, i) => toApiChallengeScore(row, i + 1)));
+    // Provisional DZPP for the whole field, from the engine that will freeze it when the
+    // round ends. rows is already in leaderboard order, which is exactly what scoreRound
+    // needs — so the placements behind these numbers are the ones on screen.
+    const provisional = new Map(
+      scoreRound(rows.map(toRoundPlay)).map((result) => [result.userId, result.finalDzpp])
+    );
+    res.json(
+      rows.map((row, i) => toApiChallengeScore(row, i + 1, provisional.get(row.user_id) ?? null))
+    );
   } catch (err) {
     fail(res, err, 'leaderboard');
   }
@@ -96,7 +105,9 @@ router.get('/my', requireAuth, async (req, res) => {
       return;
     }
     const row = await findForUser(round.id, req.user.id);
-    res.json(row === null ? null : toApiChallengeScore(row, 0));
+    // null DZPP: one row cannot know the qualified field size, and guessing it would put a
+    // number on screen that the leaderboard would then contradict.
+    res.json(row === null ? null : toApiChallengeScore(row, 0, null));
   } catch (err) {
     fail(res, err, 'my score');
   }
@@ -174,6 +185,7 @@ router.post('/scores', requireCanChallenge, importLimit, async (req, res) => {
       accuracy: play.accuracy,
       misses: play.misses,
       mods: play.mods,
+      pp: play.pp,
       qualified: qualifies(play, {
         modRequirement: winner.mod_requirement,
         challengeRequirement: winner.challenge_requirement,
@@ -181,7 +193,7 @@ router.post('/scores', requireCanChallenge, importLimit, async (req, res) => {
       osuScoreId: play.osuScoreId === 0 ? null : play.osuScoreId,
     });
 
-    res.json({ ok: true, score: toApiChallengeScore(row, 0) });
+    res.json({ ok: true, score: toApiChallengeScore(row, 0, null) });
   } catch (err) {
     fail(res, err, 'import score');
   }

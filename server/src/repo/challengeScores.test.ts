@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { orderFor, qualifies, splitMods } from './challengeScores.js';
+import { orderFor, qualifies, splitMods, toApiChallengeScore } from './challengeScores.js';
 
 describe('splitMods', () => {
   it('reads a no-mod play as no mods, however it was written', () => {
@@ -71,5 +71,57 @@ describe('orderFor', () => {
     expect(orderFor('Top #1 Score')).toContain('score DESC');
     expect(orderFor('Full Combo')).toContain('score DESC');
     expect(orderFor('')).toContain('score DESC');
+  });
+});
+
+// ── The DTO's provisional DZPP ────────────────────────────────────────────────
+//
+// A regression guard rather than a driven test: the field was added with the column. What it
+// pins is the part that is easy to get wrong later — that null survives as null instead of
+// becoming a zero, and that the stored pp column does not leak onto a public DTO that never
+// declared it.
+
+describe('toApiChallengeScore', () => {
+  const row = {
+    id: 1,
+    round_id: 3,
+    user_id: 7,
+    score: '32502940',
+    accuracy: '97.54',
+    misses: 0,
+    mods: 'HD',
+    qualified: true,
+    pp: '325.24',
+    osu_score_id: '5069480246',
+    submitted_at: new Date('2026-09-05T12:00:00Z'),
+    username: 'Heaki',
+    osu_id: '4823510',
+    avatar_url: null,
+  };
+
+  it('carries the DZPP the caller computed for the whole field', () => {
+    expect(toApiChallengeScore(row, 1, 366).dzpp).toBe(366);
+  });
+
+  // A single-score read cannot know the qualified field size, so it passes null. Null has to
+  // stay null: a zero would claim the play earned nothing, which is a different statement.
+  it('keeps an unknown DZPP null rather than zero', () => {
+    expect(toApiChallengeScore(row, 0, null).dzpp).toBeNull();
+  });
+
+  // pp is stored so the frozen row can be built from the same play the leaderboard showed. It
+  // is not part of this DTO, and adding it would be an API change rather than a rename.
+  it('does not put the stored pp column on the public DTO', () => {
+    expect('pp' in toApiChallengeScore(row, 1, 366)).toBe(false);
+  });
+
+  it('converts the bigint and numeric columns the rest of the DTO reads', () => {
+    const dto = toApiChallengeScore(row, 4, 200);
+    expect(dto.rank).toBe(4);
+    expect(dto.osuId).toBe(4823510);
+    expect(dto.score).toBe(32502940);
+    expect(dto.accuracy).toBe(97.54);
+    expect(dto.osuScoreId).toBe(5069480246);
+    expect(dto.avatarUrl).toBe('');
   });
 });

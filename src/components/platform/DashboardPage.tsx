@@ -329,15 +329,26 @@ function ChallengeLeaderboard({
       <>
 
       {/* Header row */}
-      <div className="flex items-center gap-4 px-5 py-2 bg-slate-900/30 border-b border-slate-800/40">
+      {/* RESPONSIVE, and the breakpoints are chosen so nothing is ever lost. Rank, player and
+          DZPP are always here. The qualified badge joins at sm, and score, accuracy, misses and
+          mods at lg — below which every one of them appears in the sub-line under the username
+          instead, so a narrow screen shows the same facts in a taller row rather than fewer
+          facts in a clipped one. */}
+      <div className="flex items-center gap-2 sm:gap-4 px-3 sm:px-5 py-2 bg-slate-900/30 border-b border-slate-800/40">
         <span className="w-6 text-[10px] text-slate-600 font-mono">#</span>
         <span className="w-8 flex-shrink-0" />
         <span className="flex-1 text-[10px] text-slate-600 uppercase tracking-wider">Player</span>
-        <span className="w-24 text-[10px] text-slate-600 uppercase tracking-wider text-right">Score</span>
-        <span className="w-14 text-[10px] text-slate-600 uppercase tracking-wider text-right">Acc</span>
-        <span className="w-14 text-[10px] text-slate-600 uppercase tracking-wider text-right">Miss</span>
-        <span className="w-10 text-[10px] text-slate-600 uppercase tracking-wider text-center">Mod</span>
-        <span className="w-28 text-[10px] text-slate-600 uppercase tracking-wider text-center">Status</span>
+        <span
+          className="w-16 sm:w-20 text-[10px] text-amber-400 uppercase tracking-wider text-right"
+          title="Provisional DZPP — placement and the field factor both move while the challenge is open"
+        >
+          DZPP
+        </span>
+        <span className="hidden lg:block w-24 text-[10px] text-slate-600 uppercase tracking-wider text-right">Score</span>
+        <span className="hidden lg:block w-14 text-[10px] text-slate-600 uppercase tracking-wider text-right">Acc</span>
+        <span className="hidden lg:block w-14 text-[10px] text-slate-600 uppercase tracking-wider text-right">Miss</span>
+        <span className="hidden lg:block w-10 text-[10px] text-slate-600 uppercase tracking-wider text-center">Mod</span>
+        <span className="hidden sm:block w-28 text-[10px] text-slate-600 uppercase tracking-wider text-center">Status</span>
       </div>
 
       <div className="divide-y divide-slate-800/40">
@@ -346,7 +357,7 @@ function ChallengeLeaderboard({
           return (
           <div
             key={entry.userId}
-            className={`flex items-center gap-4 px-5 py-3 transition-colors ${
+            className={`flex items-center gap-2 sm:gap-4 px-3 sm:px-5 py-3 transition-colors ${
               isMe
                 ? 'bg-amber-400/5 border-l-2 border-l-amber-400'
                 : entry.qualified
@@ -379,38 +390,65 @@ function ChallengeLeaderboard({
               </div>
             )}
 
-            {/* Username */}
+            {/* Username, and below lg the columns that are hidden at that width. Same numbers,
+                one line down — not a reduced row. */}
             <div className="flex-1 min-w-0">
               <p className={`text-sm font-bold truncate ${isMe ? 'text-amber-400' : 'text-white'}`}>
                 {entry.username}
                 {isMe && <span className="text-amber-400/60 font-normal ml-1 text-xs">(you)</span>}
               </p>
+              <p className="lg:hidden text-[10px] font-mono text-slate-500 truncate mt-0.5">
+                {entry.score.toLocaleString()} · {entry.accuracy.toFixed(1)}% ·{' '}
+                <span className={entry.misses === 0 ? 'text-emerald-400' : 'text-slate-500'}>
+                  {entry.misses}×
+                </span>{' '}
+                · {entry.mods}
+                <span className={`sm:hidden ${entry.qualified ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {' · '}{entry.qualified ? 'QUALIFIED' : 'NOT QUAL.'}
+                </span>
+              </p>
             </div>
 
+            {/* Provisional DZPP. Computed by the server with the approved engine — the same
+                scoreRound that freezes round_dzpp when the round ends — so this is the live
+                view of one formula rather than a second one. Null when the read could not
+                know the qualified field size. */}
+            <span className="w-16 sm:w-20 text-right flex-shrink-0 tabular-nums">
+              {entry.dzpp === null ? (
+                <span className="text-xs font-mono text-slate-700">—</span>
+              ) : (
+                <span className={`text-sm font-black font-mono ${entry.qualified ? 'text-amber-400' : 'text-amber-400/50'}`}>
+                  {entry.dzpp.toLocaleString()}
+                </span>
+              )}
+            </span>
+
             {/* Score */}
-            <span className="w-24 text-sm font-black font-mono text-white text-right flex-shrink-0">
+            <span className="hidden lg:block w-24 text-sm font-black font-mono text-white text-right flex-shrink-0">
               {entry.score.toLocaleString()}
             </span>
 
             {/* Accuracy */}
-            <span className="w-14 text-xs font-mono text-slate-400 text-right flex-shrink-0">
+            <span className="hidden lg:block w-14 text-xs font-mono text-slate-400 text-right flex-shrink-0">
               {entry.accuracy.toFixed(1)}%
             </span>
 
             {/* Misses */}
-            <span className={`w-14 text-xs font-mono text-right flex-shrink-0 ${entry.misses === 0 ? 'text-emerald-400 font-bold' : 'text-slate-500'}`}>
+            <span className={`hidden lg:block w-14 text-xs font-mono text-right flex-shrink-0 ${entry.misses === 0 ? 'text-emerald-400 font-bold' : 'text-slate-500'}`}>
               {entry.misses}×
             </span>
 
             {/* Mods */}
-            <div className="w-10 flex justify-center flex-shrink-0">
+            <div className="hidden lg:flex w-10 justify-center flex-shrink-0">
               <span className="text-[10px] font-mono font-bold bg-slate-800 border border-slate-700 px-1.5 py-0.5 rounded text-slate-300">
                 {entry.mods}
               </span>
             </div>
 
-            {/* Qualification */}
-            <div className="w-28 flex justify-center flex-shrink-0">
+            {/* Qualification. Held from sm rather than lg: whether a play counts at all is the
+                most important fact after DZPP, so it survives one breakpoint longer than the
+                raw numbers do. */}
+            <div className="hidden sm:flex w-28 justify-center flex-shrink-0">
               <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
                 entry.qualified
                   ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
@@ -426,6 +464,14 @@ function ChallengeLeaderboard({
           );
         })}
       </div>
+
+      {/* Said once, plainly: these numbers are not final. Placement moves as scores arrive and
+          the field factor grows with the qualified field, so the column is a running estimate
+          until the round ends and repo/dzpp.ts freezes it. */}
+      <p className="px-5 py-3 border-t border-slate-800/40 text-[10px] text-slate-600 font-mono">
+        DZPP is provisional while the challenge is open — placement and the field factor both
+        move as scores arrive. It is frozen when the round ends.
+      </p>
       </>
       )}
     </div>
@@ -655,6 +701,11 @@ interface DashboardPageProps {
   onFavorite: (map: Beatmap) => void;
   /** Imports the osu! profile favourites (A5). Resolves to an error message, or null. */
   onImportFavorites: () => Promise<string | null>;
+  /**
+   * "Submit" on a favorite card. Carries the beatmap, where this used to be onNavigate('submit')
+   * and carried nothing — so the player landed on an empty URL box and had to find it again.
+   */
+  onSubmitBeatmap: (map: Beatmap) => void;
   /** The signed-in user's own entry, whatever its review status. */
   mySubmission: ApiSubmission | null;
   /** Resolves to an error message, or null once the entry is withdrawn. */
@@ -700,6 +751,7 @@ export function DashboardPage({
   favorites,
   onFavorite,
   onImportFavorites,
+  onSubmitBeatmap,
   mySubmission,
   onWithdraw,
   myVote,
@@ -895,7 +947,7 @@ export function DashboardPage({
                     beatmap={b}
                     showSubmitButton
                     onFavorite={() => onFavorite(b)}
-                    onSubmit={() => onNavigate('submit')}
+                    onSubmit={() => onSubmitBeatmap(b)}
                   />
                 ))}
               </div>

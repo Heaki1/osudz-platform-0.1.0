@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Beatmap, PlatformPage } from '../../types';
 import { ApiSiteSettings, api, ApiBeatmapPreview, ApiSubmission } from '../../api/client';
 import { CurrentRound, pageAccess, roundLabel } from '../../lib/round';
@@ -290,6 +290,15 @@ interface FavoritesTabProps {
   onSubmitted: (submission: ApiSubmission) => void;
   /** The administrator-defined rules, for the mod and challenge-type lists (C9). */
   settings: ApiSiteSettings | null;
+  /**
+   * A difficulty the player already chose elsewhere — the dashboard's favorite cards.
+   *
+   * AN ID, NOT A BEATMAP, and resolved against `favorites` below. Preselecting an object handed in
+   * from another page would let a card that is no longer a favorite reach the requirement pickers;
+   * looking it up here means the selection is always one of this tab's own rows, so every
+   * eligibility and validation rule applies exactly as if it had been clicked.
+   */
+  preselectedDifficultyId?: number | null;
 }
 
 /**
@@ -301,7 +310,13 @@ interface FavoritesTabProps {
  * api.submissions.submit the URL tab uses, so the two paths cannot disagree about what a
  * submission is.
  */
-function FavoritesTab({ favorites, onFavorite, onSubmitted, settings }: FavoritesTabProps) {
+function FavoritesTab({
+  favorites,
+  onFavorite,
+  onSubmitted,
+  settings,
+  preselectedDifficultyId,
+}: FavoritesTabProps) {
   const [selected, setSelected] = useState<Beatmap | null>(null);
   const [mod, setMod] = useState<string | null>(null);
   const [challengeType, setChallengeType] = useState<string | null>(null);
@@ -314,6 +329,20 @@ function FavoritesTab({ favorites, onFavorite, onSubmitted, settings }: Favorite
     setChallengeType(null);
     setError(null);
   };
+
+  /**
+   * Adopts a handoff from the dashboard, once, as soon as the favorite it names is loaded.
+   *
+   * Keyed on the id and the list, so it also fires when the favorites arrive AFTER the navigation —
+   * which is the normal case, since App reads them asynchronously. A id that matches nothing leaves
+   * the tab on its list rather than selecting something arbitrary; that happens when the beatmap
+   * was unfavorited in between, and showing the list is the honest answer.
+   */
+  useEffect(() => {
+    if (preselectedDifficultyId === null || preselectedDifficultyId === undefined) return;
+    const match = favorites.find((b) => b.difficultyId === preselectedDifficultyId);
+    if (match) setSelected(match);
+  }, [preselectedDifficultyId, favorites]);
 
   const handleSubmit = async () => {
     // A favorite without a difficulty id cannot be submitted, and there is no such row:
@@ -530,6 +559,15 @@ interface PlatformSubmitPageProps {
   onFavorite: (map: Beatmap) => void;
   /** The administrator-defined submission rules (C8, C9). Null until the first read. */
   settings: ApiSiteSettings | null;
+  /**
+   * A difficulty the player already chose on the dashboard, as an osu! difficulty id.
+   *
+   * When it is set the page opens on the favorites tab with that row selected, so "Submit" on a
+   * favorite card lands on the requirement pickers rather than on an empty URL box. It is only a
+   * starting point: the tab resolves it against the favorites it holds, and every validation and
+   * eligibility rule is the same one the manual path goes through.
+   */
+  preselectedDifficultyId?: number | null;
   loading: boolean;
   onSubmitted: (submission: ApiSubmission) => void;
   /** Resolves to an error message, or null once the entry is withdrawn. */
@@ -544,6 +582,7 @@ export function PlatformSubmitPage({
   favorites,
   onFavorite,
   settings,
+  preselectedDifficultyId,
   mySubmission,
   loading,
   onSubmitted,
@@ -552,7 +591,20 @@ export function PlatformSubmitPage({
   user,
   onLogin,
 }: PlatformSubmitPageProps) {
+  // 'url' by default, because pasting a link is the path that always works — a player with no
+  // favorites has nothing to pick from.
   const [tab, setTab] = useState<SubmitTab>('url');
+
+  /**
+   * A handoff from the dashboard opens the favorites tab, since that is where the chosen beatmap
+   * lives. Keyed on the id alone, so switching tabs by hand afterwards is not overridden on every
+   * re-render — and App drops the handoff on leaving the page, so coming back later opens clean.
+   */
+  useEffect(() => {
+    if (preselectedDifficultyId !== null && preselectedDifficultyId !== undefined) {
+      setTab('favorites');
+    }
+  }, [preselectedDifficultyId]);
   // Same table the nav and the vote page read, so "closed" means one thing.
   const access = pageAccess('submit', round);
 
@@ -623,6 +675,7 @@ export function PlatformSubmitPage({
               onFavorite={onFavorite}
               onSubmitted={onSubmitted}
               settings={settings}
+              preselectedDifficultyId={preselectedDifficultyId}
             />
           )}
         </>

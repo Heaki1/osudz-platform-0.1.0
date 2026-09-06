@@ -263,6 +263,15 @@ export interface OsuScore {
   misses: number;
   /** Acronyms joined ('HDHR'), or 'NM' when the play had none. */
   mods: string;
+  /**
+   * osu! pp for this play, or null when osu! reported none — a Loved beatmap, an unranked
+   * mod combination, and anything else osu! declines to rate.
+   *
+   * THE DZPP PERFORMANCE TERM, and the only pp this project reads. It belongs to the play,
+   * not to the player: nothing here or anywhere else imports a profile total or a global
+   * rank into the ranking.
+   */
+  pp: number | null;
   rank: string;
   passed: boolean;
   endedAt: string | null;
@@ -325,6 +334,10 @@ export async function fetchUserScore(difficultyId: number, osuUserId: number): P
     accuracy: Math.round(accuracy * 10_000) / 100,
     misses: Math.round(misses),
     mods: readMods(s.mods),
+    // Parsed rather than discarded, as it was before DZPP. asNumber already answers null
+    // for the null osu! sends on an unrated play, which is the distinction the nullable
+    // challenge_scores.pp column exists to keep.
+    pp: asNumber(s.pp),
     rank: typeof s.rank === 'string' ? s.rank : '',
     passed: s.passed !== false,
     endedAt:
@@ -354,8 +367,92 @@ export async function fetchUserScore(difficultyId: number, osuUserId: number): P
 /** Which statuses a search may ask for. 'any' means every submittable status. */
 export type SearchStatus = 'any' | SubmittableStatus;
 
-/** How a page of hits is ordered. */
-export type SearchSort = 'stars' | 'bpm';
+/**
+ * How a page of hits is ordered.
+ *
+ * 'relevance' and 'newest' are osu!'s own orderings and are left exactly as it returned them —
+ * it is the only party that knows what relevance means or when a set was ranked. 'stars' and
+ * 'bpm' are applied here, because osu! cannot sort by BPM at all.
+ */
+export type SearchSort = 'relevance' | 'newest' | 'stars' | 'bpm';
+
+export const SEARCH_SORTS = ['relevance', 'newest', 'stars', 'bpm'] as const;
+
+export const isSearchSort = (value: unknown): value is SearchSort =>
+  (SEARCH_SORTS as readonly unknown[]).includes(value);
+
+/**
+ * What a search is actually asking for.
+ *
+ * Every field is optional and an absent one is no constraint, which is what lets the search page
+ * start with nothing filled in and still show osu!'s default listing.
+ */
+export interface SearchFilters {
+  /** Free text. osu! matches it against title, artist and mapper. */
+  q?: string;
+  /** A mapper name, which becomes an explicit creator clause rather than more free text. */
+  mapper?: string;
+  minStars?: number;
+  maxStars?: number;
+  minBpm?: number;
+  maxBpm?: number;
+}
+
+/** A bound that is not a finite number is not a bound. */
+const usableBound = (value: number | undefined): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+/**
+ * Composes osu!'s own advanced-search string.
+ *
+ * THE RANGES GO INSIDE q, because that is where osu! takes them: `stars>=5 bpm<=200` filters the
+ * WHOLE result set, where filtering the returned page would only narrow one screenful and call it
+ * a search. A malformed clause is the risk — osu! does not error on one, it reads it as free text
+ * and quietly answers something else — which is why this is a tested pure function and why
+ * withinRange re-checks the page that comes back.
+ */
+export function buildSearchQuery(filters: SearchFilters): string {
+  const clauses: string[] = [];
+
+  const text = (filters.q ?? '').trim();
+  if (text !== '') clauses.push(text);
+
+  const mapper = (filters.mapper ?? '').trim();
+  // Quoted when it contains whitespace, or the clause would end after the first word and the rest
+  // would become free text.
+  if (mapper !== '') clauses.push(`creator=${/\s/.test(mapper) ? `"${mapper}"` : mapper}`);
+
+  const bounded = (key: string, min?: number, max?: number): void => {
+    const low = usableBound(min);
+    if (low !== null) clauses.push(`${key}>=${low}`);
+    const high = usableBound(max);
+    if (high !== null) clauses.push(`${key}<=${high}`);
+  };
+  bounded('stars', filters.minStars, filters.maxStars);
+  bounded('bpm', filters.minBpm, filters.maxBpm);
+
+  return clauses.join(' ');
+}
+
+/**
+ * Whether the difficulty a card will show actually sits inside the requested ranges.
+ *
+ * The second line of defence behind the q clauses. Both bounds are inclusive, and it agrees with
+ * buildSearchQuery about what counts as a bound so the two can never disagree about a hit.
+ */
+export function withinRange(hit: { stars: number; bpm: number }, filters: SearchFilters): boolean {
+  const inside = (value: number, min?: number, max?: number): boolean => {
+    const low = usableBound(min);
+    if (low !== null && value < low) return false;
+    const high = usableBound(max);
+    if (high !== null && value > high) return false;
+    return true;
+  };
+  return (
+    inside(hit.stars, filters.minStars, filters.maxStars) &&
+    inside(hit.bpm, filters.minBpm, filters.maxBpm)
+  );
+}
 
 /** One search hit: a beatmapset, represented by one of its difficulties. */
 export interface OsuSearchHit {
@@ -401,23 +498,39 @@ export const isSearchStatus = (value: unknown): value is SearchStatus =>
  * for representing the set, and letting one through here only moves the rejection into
  * toSearchHit.
  */
-export function pickDifficulty(beatmaps: unknown): Record<string, unknown> | null {
+export function pickDifficulty(
+  beatmaps: unknown,
+  range: Pick<SearchFilters, 'minStars' | 'maxStars'> = {}
+): Record<string, unknown> | null {
   if (!Array.isArray(beatmaps)) return null;
 
   let best: Record<string, unknown> | null = null;
   let bestStars = -1;
+  let inRange: Record<string, unknown> | null = null;
+  let inRangeStars = -1;
+
   for (const raw of beatmaps) {
     if (!raw || typeof raw !== 'object') continue;
     const b = raw as Record<string, unknown>;
     if (asNumber(b.id) === null) continue;
     const stars = asNumber(b.difficulty_rating);
     if (stars === null) continue;
+
     if (stars > bestStars) {
       best = b;
       bestStars = stars;
     }
+    // bpm 0 with no BPM bound passed is always inside, so this checks the star range alone.
+    if (stars > inRangeStars && withinRange({ stars, bpm: 0 }, range)) {
+      inRange = b;
+      inRangeStars = stars;
+    }
   }
-  return best;
+
+  // The in-range pick when there is one, so a 3-4 star search shows a 3-4 star card rather than
+  // the set's 7.2 star top difficulty. Falling back rather than returning null keeps the decision
+  // to DROP the hit with the caller's own range filter, so one place says no.
+  return inRange ?? best;
 }
 
 /**
@@ -430,8 +543,23 @@ export function pickDifficulty(beatmaps: unknown): Record<string, unknown> | nul
  * the page that came back and not the whole result set. The page says so.
  */
 export function orderHits(hits: OsuSearchHit[], by: SearchSort): OsuSearchHit[] {
+  // osu! already ordered these, and for relevance and ranked date it is the only party that can.
+  if (by === 'relevance' || by === 'newest') return [...hits];
   return [...hits].sort((a, b) => (by === 'bpm' ? b.bpm - a.bpm : b.stars - a.stars));
 }
+
+/**
+ * osu!'s own sort parameter for each of ours.
+ *
+ * 'bpm' borrows difficulty_desc because osu! has no BPM sort at all; orderHits then reorders the
+ * page, and the search page says so rather than implying the whole result set was sorted.
+ */
+const SEARCH_SORT_PARAM: Record<SearchSort, string> = {
+  relevance: 'relevance_desc',
+  newest: 'ranked_desc',
+  stars: 'difficulty_desc',
+  bpm: 'difficulty_desc',
+};
 
 /**
  * Searches beatmapsets. One page — osu! paginates with a cursor and nothing on this
@@ -442,15 +570,16 @@ export function orderHits(hits: OsuSearchHit[], by: SearchSort): OsuSearchHit[] 
  * which is what gives the search page something to show before anyone has typed.
  */
 export async function searchBeatmapsets(
-  query: string,
-  status: SearchStatus
+  filters: SearchFilters,
+  status: SearchStatus,
+  sort: SearchSort
 ): Promise<OsuSearchHit[]> {
   const params = new URLSearchParams({
     s: SEARCH_STATUS_PARAM[status],
-    sort: 'difficulty_desc',
+    sort: SEARCH_SORT_PARAM[sort],
   });
-  const trimmed = query.trim();
-  if (trimmed !== '') params.set('q', trimmed);
+  const query = buildSearchQuery(filters);
+  if (query !== '') params.set('q', query);
 
   const res = await fetch(`${API_BASE}/beatmapsets/search?${params.toString()}`, {
     headers: { Authorization: `Bearer ${await getAppToken()}`, Accept: 'application/json' },
@@ -464,8 +593,12 @@ export async function searchBeatmapsets(
 
   const hits: OsuSearchHit[] = [];
   for (const raw of body.beatmapsets) {
-    const hit = toSearchHit(raw, status);
-    if (hit !== null) hits.push(hit);
+    const hit = toSearchHit(raw, status, filters);
+    // withinRange again, on what came back. The ranges were already sent to osu! inside q, so
+    // this is not the filter — it is the check that the filter worked. osu! answers a clause it
+    // does not understand by treating it as free text, and a card outside the range the player
+    // asked for is worse than one fewer result.
+    if (hit !== null && withinRange(hit, filters)) hits.push(hit);
   }
   return hits;
 }
@@ -480,7 +613,11 @@ export async function searchBeatmapsets(
  * search is fifty maps nobody named, and failing the whole page because one result is
  * odd would be worse than quietly showing forty-nine.
  */
-function toSearchHit(raw: unknown, status: SearchStatus): OsuSearchHit | null {
+function toSearchHit(
+  raw: unknown,
+  status: SearchStatus,
+  filters: SearchFilters = {}
+): OsuSearchHit | null {
   if (!raw || typeof raw !== 'object') return null;
   const set = raw as Record<string, unknown>;
 
@@ -488,7 +625,9 @@ function toSearchHit(raw: unknown, status: SearchStatus): OsuSearchHit | null {
   if (!(SUBMITTABLE_STATUSES as readonly string[]).includes(mapStatus)) return null;
   if (status !== 'any' && mapStatus !== status) return null;
 
-  const difficulty = pickDifficulty(set.beatmaps);
+  // The star range decides WHICH difficulty represents the set, so the card shows one the player
+  // actually asked for rather than the set's hardest.
+  const difficulty = pickDifficulty(set.beatmaps, filters);
   if (difficulty === null) return null;
 
   const covers = (set.covers ?? {}) as Record<string, unknown>;

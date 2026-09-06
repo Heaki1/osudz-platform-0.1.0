@@ -25,6 +25,12 @@ import {
   toApiRound,
 } from '../repo/rounds.js';
 import {
+  freezeEndedRound,
+  listRecomputes,
+  recomputeRound,
+  toApiDzppRecompute,
+} from '../repo/dzpp.js';
+import {
   findById as findSubmission,
   listForRound,
   review,
@@ -147,6 +153,12 @@ router.patch('/round/phase', async (req, res) => {
       res.status(409).json({ error: 'Round no longer exists' });
       return;
     }
+    // Ending a round is what freezes its DZPP. Idempotent through the latch in
+    // repo/dzpp.ts, so ending a round the clock has just ended writes nothing twice, and
+    // non-throwing, so a ranking failure cannot make a phase change that DID happen answer
+    // as though it had not.
+    if (updated.phase === 'ended') await freezeEndedRound(updated.id);
+
     // Only when the phase actually moved: this endpoint is also how a deadline gets
     // rewritten, and canTransition allows from === to for exactly that reason.
     if (updated.phase !== open.phase) announcePhase(updated, updated.phase, false);
@@ -393,6 +405,21 @@ router.post('/challenge/scores', async (req, res) => {
     return;
   }
 
+  // OPTIONAL, and absent is the sensible default. This path exists for a play the osu! API
+  // will not give up, and an administrator reading a score off a screenshot usually cannot
+  // know its pp either. Null means "no performance value" to the DZPP formula, which is a
+  // different thing from zero pp earned — so guessing a number here would be worse than
+  // leaving it out. Rounded to match numeric(8,2), the way accuracy is on the line below.
+  let pp: number | null = null;
+  if (body.pp !== undefined && body.pp !== null && body.pp !== '') {
+    const value = Number(body.pp);
+    if (!Number.isFinite(value) || value < 0) {
+      res.status(400).json({ error: 'pp must be a non-negative number, or omitted' });
+      return;
+    }
+    pp = Math.round(value * 100) / 100;
+  }
+
   try {
     const open = await findCurrent();
     if (!open) {
@@ -425,6 +452,7 @@ router.post('/challenge/scores', async (req, res) => {
       accuracy: Math.round(accuracy * 100) / 100,
       misses,
       mods,
+      pp,
       qualified: qualifies(
         { mods, misses },
         {
@@ -435,9 +463,79 @@ router.post('/challenge/scores', async (req, res) => {
       osuScoreId: null,
     });
 
-    res.json({ ok: true, score: toApiChallengeScore(row, 0) });
+    res.json({ ok: true, score: toApiChallengeScore(row, 0, null) });
   } catch (err) {
     fail(res, err, 'record score');
+  }
+});
+
+// ── DZPP recompute (Phase 7) ─────────────────────────────────────────────────
+//
+// THE ONLY SANCTIONED WAY A FROZEN ROUND CHANGES. Freezing is what keeps roadmap rule 7 honest:
+// a constant retuned in month five must not silently rewrite months one to four. Its cost is
+// that a round sometimes has to be scored again, and this is that — explicit, audited, and
+// scoped to one round.
+//
+// ONE ROUND ID, ALWAYS, AND NO DEFAULT. There is no bulk form and no "all rounds" flag: a single
+// call that rewrote every historical round would be one mistake away from reshaping the whole
+// leaderboard, and no audit row can undo that. The caller names the round or gets a 400.
+//
+// A REASON IS REQUIRED, with the same ten-character minimum the result-correction endpoint uses
+// (D4). The freeze exists so history does not move quietly, and an unexplained recompute is the
+// quiet case wearing a timestamp.
+//
+// requireAdmin covers this router, so the administrator is the session rather than anything the
+// body can assert.
+
+// GET /api/admin/dzpp/recomputes?roundId= — one round's recompute history, newest first.
+router.get('/dzpp/recomputes', async (req, res) => {
+  const raw = req.query.roundId;
+  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) {
+    res.status(400).json({ error: 'roundId must be a positive integer' });
+    return;
+  }
+
+  try {
+    const rows = await listRecomputes(Number(raw));
+    res.json(rows.map(toApiDzppRecompute));
+  } catch (err) {
+    fail(res, err, 'recompute history');
+  }
+});
+
+// POST /api/admin/dzpp/recompute — rescore ONE ended round. Body: { roundId, reason }.
+router.post('/dzpp/recompute', async (req, res) => {
+  const { roundId, reason } = (req.body ?? {}) as Record<string, unknown>;
+
+  const id = Number(roundId);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: 'roundId must be a positive integer — a recompute names one round' });
+    return;
+  }
+  if (typeof reason !== 'string' || reason.trim().length < 10) {
+    res.status(400).json({
+      error: 'A reason of at least 10 characters is required — a recompute has to say why.',
+    });
+    return;
+  }
+  if (!req.user) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+
+  try {
+    const outcome = await recomputeRound(id, reason.trim(), req.user.id);
+    if (!outcome.ok) {
+      const message =
+        outcome.reason === 'gone'
+          ? 'That round no longer exists'
+          : 'DZPP is only recomputed for a round that has ended — an open round can still change on its own';
+      res.status(409).json({ error: message });
+      return;
+    }
+    res.json({ ok: true, summary: outcome.summary });
+  } catch (err) {
+    fail(res, err, 'dzpp recompute');
   }
 });
 

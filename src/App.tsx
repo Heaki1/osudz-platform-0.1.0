@@ -6,6 +6,7 @@ import { SearchPage } from './components/platform/SearchPage';
 import { AdminDashboard } from './components/platform/AdminDashboard';
 import { PlatformSubmitPage } from './components/platform/PlatformSubmitPage';
 import { ArchivePage } from './components/platform/ArchivePage';
+import { RankingsPage } from './components/platform/RankingsPage';
 import {
   api,
   ApiChallengeScore,
@@ -33,6 +34,12 @@ const toAuthUser = (u: ApiUser): AuthUser => ({
 
 export default function App() {
   const [platformPage, setPlatformPage] = useState<PlatformPage>('dashboard');
+  /**
+   * A beatmap the player chose somewhere else and asked to submit — the osu! difficulty id, not
+   * the object, so the submit page resolves it against the favorites IT holds and can only ever
+   * preselect a real one. Every submission rule stays where it was.
+   */
+  const [submitDifficultyId, setSubmitDifficultyId] = useState<number | null>(null);
   const [platformUser, setPlatformUser] = useState<AuthUser | null>(null);
   const [round, setRound] = useState<CurrentRound | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -131,6 +138,28 @@ export default function App() {
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, [refresh]);
+
+  /**
+   * Navigation, with one side effect: leaving the submit page drops any pending handoff, so
+   * coming back to Submit later opens it clean rather than reopening a choice made minutes ago.
+   */
+  const navigate = useCallback((page: PlatformPage) => {
+    setPlatformPage(page);
+    if (page !== 'submit') setSubmitDifficultyId(null);
+  }, []);
+
+  /**
+   * "Submit" on a favorite card. It used to navigate to the submit page and nothing else, so the
+   * player arrived on the URL tab with an empty box and had to find the beatmap again. It now
+   * carries the choice, and the submit page opens on the favorites tab with it selected.
+   */
+  const handleSubmitBeatmap = useCallback(
+    (map: Beatmap) => {
+      setSubmitDifficultyId(map.difficultyId ?? null);
+      setPlatformPage('submit');
+    },
+    []
+  );
 
   const handleLogin = () => {
     window.location.href = api.auth.loginUrl();
@@ -290,7 +319,7 @@ export default function App() {
         page={platformPage}
         phase={phase}
         round={round}
-        onNavigate={setPlatformPage}
+        onNavigate={navigate}
         user={platformUser}
         onLogin={handleLogin}
         onLogout={handleLogout}
@@ -335,6 +364,7 @@ export default function App() {
             favorites={favoriteMaps}
             onFavorite={handleFavorite}
             onImportFavorites={handleImportFavorites}
+            onSubmitBeatmap={handleSubmitBeatmap}
             mySubmission={mySubmission}
             onWithdraw={handleWithdraw}
             myVote={myVote}
@@ -346,7 +376,7 @@ export default function App() {
             challengeLoaded={challengeLoaded}
             myScore={myScore}
             onImportScore={handleImportScore}
-            onNavigate={setPlatformPage}
+            onNavigate={navigate}
             user={platformUser}
             onLogin={handleLogin}
           />
@@ -366,7 +396,7 @@ export default function App() {
             onScrub={handleScrub}
             onVote={handleVote}
             onFavorite={handleFavorite}
-            onNavigate={setPlatformPage}
+            onNavigate={navigate}
             user={platformUser}
             onLogin={handleLogin}
           />
@@ -380,11 +410,12 @@ export default function App() {
             mySubmission={mySubmission}
             favorites={favoriteMaps}
             onFavorite={handleFavorite}
+            preselectedDifficultyId={submitDifficultyId}
             settings={settings}
             loading={!loaded}
             onSubmitted={setMySubmission}
             onWithdraw={handleWithdraw}
-            onNavigate={setPlatformPage}
+            onNavigate={navigate}
             user={platformUser}
             onLogin={handleLogin}
           />
@@ -397,6 +428,9 @@ export default function App() {
             onLogin={handleLogin}
           />
         )}
+        {/* The rankings page owns its own reads, so it takes only the caller — it needs the
+            signed-in id to mark their row, and nothing else from App's state. */}
+        {platformPage === 'rankings' && <RankingsPage user={platformUser} />}
         {platformPage === 'archive' && <ArchivePage />}
       </main>
     </div>

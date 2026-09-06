@@ -5,6 +5,8 @@ import {
   parseDifficultyId,
   pickDifficulty,
   type OsuSearchHit,
+  buildSearchQuery,
+  withinRange,
 } from './osu.js';
 
 describe('parseDifficultyId', () => {
@@ -124,5 +126,149 @@ describe('orderHits', () => {
     const hits = [hit(4, 200), hit(7, 150)];
     orderHits(hits, 'stars');
     expect(hits.map((h) => h.stars)).toEqual([4, 7]);
+  });
+});
+
+// ── Search filters ───────────────────────────────────────────────────────────
+//
+// osu! search takes its advanced filters INSIDE the q string, in its own little query
+// language: `creator=x`, `stars>=5`, `bpm<=200`. Composing that is the whole of
+// buildSearchQuery, and it is worth testing because a malformed clause does not error — osu!
+// treats it as free text and quietly returns the wrong results.
+
+describe('buildSearchQuery', () => {
+  it('is empty when nothing was asked for', () => {
+    expect(buildSearchQuery({})).toBe('');
+    expect(buildSearchQuery({ q: '   ', mapper: '' })).toBe('');
+  });
+
+  it('passes free text through, trimmed', () => {
+    expect(buildSearchQuery({ q: '  freedom dive  ' })).toBe('freedom dive');
+  });
+
+  it('turns a mapper into the creator clause osu! understands', () => {
+    expect(buildSearchQuery({ mapper: 'peppy' })).toBe('creator=peppy');
+  });
+
+  // A value with a space would otherwise split into a clause and a stray word.
+  it('quotes a mapper name containing whitespace', () => {
+    expect(buildSearchQuery({ mapper: 'Sotarks Two' })).toBe('creator="Sotarks Two"');
+  });
+
+  it('expresses a star range as two bounded clauses', () => {
+    expect(buildSearchQuery({ minStars: 5 })).toBe('stars>=5');
+    expect(buildSearchQuery({ maxStars: 6.5 })).toBe('stars<=6.5');
+    expect(buildSearchQuery({ minStars: 5, maxStars: 6.5 })).toBe('stars>=5 stars<=6.5');
+  });
+
+  it('expresses a BPM range the same way', () => {
+    expect(buildSearchQuery({ minBpm: 180, maxBpm: 200 })).toBe('bpm>=180 bpm<=200');
+  });
+
+  it('joins every clause it was given, free text first', () => {
+    expect(
+      buildSearchQuery({ q: 'dive', mapper: 'peppy', minStars: 5, maxStars: 6, minBpm: 180, maxBpm: 200 })
+    ).toBe('dive creator=peppy stars>=5 stars<=6 bpm>=180 bpm<=200');
+  });
+
+  // A bound that is not a finite number is not a bound. It cannot come from the route, which
+  // validates first, so this keeps the helper total rather than trusting the caller.
+  it('ignores a bound that is not a usable number', () => {
+    expect(buildSearchQuery({ minStars: Number.NaN, maxBpm: Number.POSITIVE_INFINITY })).toBe('');
+  });
+});
+
+describe('withinRange', () => {
+  const hit = { stars: 5.5, bpm: 190 };
+
+  it('accepts a hit when no bound was given', () => {
+    expect(withinRange(hit, {})).toBe(true);
+  });
+
+  it('treats both bounds as inclusive', () => {
+    expect(withinRange(hit, { minStars: 5.5, maxStars: 5.5 })).toBe(true);
+    expect(withinRange(hit, { minBpm: 190, maxBpm: 190 })).toBe(true);
+  });
+
+  it('rejects a hit outside either range', () => {
+    expect(withinRange(hit, { minStars: 6 })).toBe(false);
+    expect(withinRange(hit, { maxStars: 5 })).toBe(false);
+    expect(withinRange(hit, { minBpm: 200 })).toBe(false);
+    expect(withinRange(hit, { maxBpm: 180 })).toBe(false);
+  });
+
+  // The local filter is a second line of defence behind the q clauses, so it must agree with
+  // them rather than narrow further: an unusable bound is no bound in both places.
+  it('ignores a bound that is not a usable number', () => {
+    expect(withinRange(hit, { minStars: Number.NaN })).toBe(true);
+  });
+});
+
+// ── Range-aware difficulty pick ──────────────────────────────────────────────
+//
+// A card represents its set by ONE difficulty, and osu! matches a set when ANY of its
+// difficulties fits the filter. Represent the set by its hardest difficulty regardless, and a
+// 3-4 star search shows a card reading 7.2 stars — which looks broken rather than clever. So
+// when a star range was asked for, the set is represented by the hardest difficulty INSIDE it.
+
+describe('pickDifficulty with a star range', () => {
+  const set = [
+    { id: 1, difficulty_rating: 2.4 },
+    { id: 2, difficulty_rating: 3.6 },
+    { id: 3, difficulty_rating: 7.2 },
+  ];
+
+  it('picks the hardest difficulty inside the range, not the hardest overall', () => {
+    expect(pickDifficulty(set, { minStars: 3, maxStars: 4 })?.id).toBe(2);
+  });
+
+  it('honours a lower bound alone', () => {
+    expect(pickDifficulty(set, { minStars: 3 })?.id).toBe(3);
+  });
+
+  it('honours an upper bound alone', () => {
+    expect(pickDifficulty(set, { maxStars: 4 })?.id).toBe(2);
+  });
+
+  // Falls back rather than returning null, so the decision to drop the hit stays with the
+  // caller's own range filter and there is one place that says no.
+  it('falls back to the hardest overall when nothing is inside the range', () => {
+    expect(pickDifficulty(set, { minStars: 8 })?.id).toBe(3);
+  });
+
+  it('is unchanged when no range is given', () => {
+    expect(pickDifficulty(set)?.id).toBe(3);
+    expect(pickDifficulty(set, {})?.id).toBe(3);
+  });
+});
+
+// ── Sorting ──────────────────────────────────────────────────────────────────
+
+describe('orderHits with the four sorts', () => {
+  const hits = [
+    { stars: 4, bpm: 200, title: 'a' },
+    { stars: 7, bpm: 150, title: 'b' },
+    { stars: 5, bpm: 180, title: 'c' },
+  ] as unknown as Parameters<typeof orderHits>[0];
+
+  it('orders by stars descending', () => {
+    expect(orderHits(hits, 'stars').map((h) => h.stars)).toEqual([7, 5, 4]);
+  });
+
+  it('orders by BPM descending', () => {
+    expect(orderHits(hits, 'bpm').map((h) => h.bpm)).toEqual([200, 180, 150]);
+  });
+
+  // osu! already ordered these, and it is the only party that knows what relevance or a
+  // ranked date means. Re-ordering them here would throw that away.
+  it('leaves the osu! order alone for relevance and newest', () => {
+    expect(orderHits(hits, 'relevance').map((h) => h.stars)).toEqual([4, 7, 5]);
+    expect(orderHits(hits, 'newest').map((h) => h.stars)).toEqual([4, 7, 5]);
+  });
+
+  it('never mutates the array it was given', () => {
+    const before = hits.map((h) => h.stars);
+    orderHits(hits, 'stars');
+    expect(hits.map((h) => h.stars)).toEqual(before);
   });
 });

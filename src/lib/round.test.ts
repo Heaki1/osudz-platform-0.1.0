@@ -27,6 +27,7 @@ const apiRound = (over: Partial<ApiRound> = {}): ApiRound => ({
   winnerVoteCount: null,
   totalVotes: null,
   winnerApprovedAt: null,
+  dzppFinalizedAt: null,
   ...over,
 });
 

@@ -7,6 +7,7 @@
 // a single row cannot be both.
 
 import { pool } from '../db.js';
+import { freezeEndedRound } from './dzpp.js';
 import { announceBallotClosed, announcePhase } from '../services/discord.js';
 
 export type RoundPhase = 'submission' | 'voting' | 'challenge' | 'ended';
@@ -81,12 +82,15 @@ export interface RoundRow {
   total_votes: number | null;
   winner_approved_by: number | null;
   winner_approved_at: Date | null;
+  /** When DZPP was frozen for this round. Null means it has not been (migration 013). */
+  dzpp_finalized_at: Date | null;
 }
 
 const COLUMNS = `id, round_number, phase, month, year, reward,
                  submission_ends_at, voting_ends_at, challenge_ends_at,
                  winner_status, winning_submission_id, winner_vote_count,
-                 total_votes, winner_approved_by, winner_approved_at`;
+                 total_votes, winner_approved_by, winner_approved_at,
+                 dzpp_finalized_at`;
 
 // ── The clock ────────────────────────────────────────────────────────────────
 //
@@ -188,6 +192,11 @@ async function applyDueTransitions(round: RoundRow): Promise<RoundRow> {
     const moved = await advanceOnDeadline(current.id, 'challenge', 'ended');
     if (moved) {
       current = moved;
+      // Ending the challenge is what freezes its DZPP. Only the caller whose UPDATE matched
+      // gets here, so the ranking is scored once however many reads race for it — and
+      // freezeEndedRound never throws, so a ranking problem cannot break every page load
+      // through findCurrent().
+      await freezeEndedRound(moved.id);
       announcePhase(moved, 'ended', true);
     }
   }
@@ -512,6 +521,13 @@ export async function skipEmptyVoting(roundId: number): Promise<SkipVotingOutcom
     );
 
     await client.query('COMMIT');
+
+    // After the commit, deliberately: the round has to BE ended before its DZPP can be
+    // frozen, and freezeEndedRound takes its own connection. A ballot this empty had no
+    // challenge phase and so has no scores, so this writes no rows — it stamps the latch, so
+    // the round reads as settled rather than as one nobody ever got round to scoring.
+    await freezeEndedRound(roundId);
+
     return { ok: true, round: updated[0] };
   } catch (err) {
     await client.query('ROLLBACK');
@@ -631,6 +647,13 @@ export function toApiRound(row: RoundRow) {
     winnerVoteCount: row.winner_vote_count,
     totalVotes: row.total_votes,
     winnerApprovedAt: row.winner_approved_at?.toISOString() ?? null,
+    /**
+     * Read-only status, for the admin recompute panel: null means this round's DZPP was never
+     * frozen. It is on the round rather than counted from round_dzpp because the latch is the
+     * authoritative answer — a round can be finalized to zero rows, and a row count cannot tell
+     * that apart from never having run.
+     */
+    dzppFinalizedAt: row.dzpp_finalized_at?.toISOString() ?? null,
   };
 }
 

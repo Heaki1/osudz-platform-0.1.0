@@ -21,6 +21,8 @@ export interface ChallengeScoreRow {
   misses: number;
   mods: string;
   qualified: boolean;
+  /** numeric(8,2), also a string. Null when osu! reported no pp for the play. */
+  pp: string | null;
   osu_score_id: string | null;
   submitted_at: Date;
   /** Joined from users, for the leaderboard. */
@@ -39,12 +41,14 @@ export interface NewChallengeScore {
   /** Acronyms joined with no separator ('HDHR'), or 'NM' for a no-mod play. */
   mods: string;
   qualified: boolean;
+  /** osu! pp for the play, or null when osu! reported none. The DZPP performance term. */
+  pp: number | null;
   /** The osu! score id when this came from the API; null when entered by hand. */
   osuScoreId: number | null;
 }
 
 const COLUMNS = `cs.id, cs.round_id, cs.user_id, cs.score, cs.accuracy, cs.misses,
-                 cs.mods, cs.qualified, cs.osu_score_id, cs.submitted_at,
+                 cs.mods, cs.qualified, cs.pp, cs.osu_score_id, cs.submitted_at,
                  u.username, u.osu_id, u.avatar_url`;
 
 const SELECT = `SELECT ${COLUMNS} FROM challenge_scores cs JOIN users u ON u.id = cs.user_id`;
@@ -161,14 +165,15 @@ export async function findForUser(
 export async function upsert(score: NewChallengeScore): Promise<ChallengeScoreRow> {
   const { rows } = await pool.query<{ id: number }>(
     `INSERT INTO challenge_scores
-       (round_id, user_id, score, accuracy, misses, mods, qualified, osu_score_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (round_id, user_id, score, accuracy, misses, mods, qualified, pp, osu_score_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      ON CONFLICT (round_id, user_id) DO UPDATE
         SET score        = EXCLUDED.score,
             accuracy     = EXCLUDED.accuracy,
             misses       = EXCLUDED.misses,
             mods         = EXCLUDED.mods,
             qualified    = EXCLUDED.qualified,
+            pp           = EXCLUDED.pp,
             osu_score_id = EXCLUDED.osu_score_id,
             submitted_at = now()
      RETURNING id`,
@@ -180,6 +185,7 @@ export async function upsert(score: NewChallengeScore): Promise<ChallengeScoreRo
       score.misses,
       score.mods,
       score.qualified,
+      score.pp,
       score.osuScoreId,
     ]
   );
@@ -192,8 +198,23 @@ export async function upsert(score: NewChallengeScore): Promise<ChallengeScoreRo
   return full[0];
 }
 
-/** Maps a row to the ApiChallengeScore DTO declared in src/api/client.ts. */
-export function toApiChallengeScore(row: ChallengeScoreRow, rank: number) {
+/**
+ * Maps a row to the ApiChallengeScore DTO declared in src/api/client.ts.
+ *
+ * `dzpp` is PROVISIONAL and comes from the caller, because no single row can know it: the
+ * placement award depends on where this play sits among the qualified ones and on how many
+ * there are, which are facts about the whole round. A caller reading one score in isolation
+ * passes null, which is honest rather than a zero.
+ *
+ * The value itself is always computed by scoreRound in repo/dzpp.ts — the same function that
+ * freezes round_dzpp when the round ends — so there is one formula and one set of constants,
+ * never a second copy for the live view.
+ */
+export function toApiChallengeScore(
+  row: ChallengeScoreRow,
+  rank: number,
+  dzpp: number | null
+) {
   return {
     rank,
     userId: row.user_id,
@@ -205,6 +226,12 @@ export function toApiChallengeScore(row: ChallengeScoreRow, rank: number) {
     misses: row.misses,
     mods: row.mods,
     qualified: row.qualified,
+    /**
+     * DZPP as the round stands right now, or null when it cannot be known from one row.
+     * Provisional: placement and the field factor both move while the challenge is open, and
+     * only round_dzpp is final.
+     */
+    dzpp,
     /** Null when an administrator entered this by hand rather than importing it. */
     osuScoreId: row.osu_score_id === null ? null : Number(row.osu_score_id),
     submittedAt: row.submitted_at.toISOString(),

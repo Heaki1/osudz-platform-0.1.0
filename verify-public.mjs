@@ -199,6 +199,10 @@ console.log('\n--- every admin route refuses an anonymous caller before it does 
     ['GET',    '/admin/round/corrections'],
     ['POST',   '/admin/round/correction',   { submissionId: 1, reason: 'x' }],
     ['GET',    '/admin/votes'],
+    // Phase 7. The gate has to answer before the recompute does anything, because the
+    // recompute is the one write that can move a player-facing historical number.
+    ['GET',    '/admin/dzpp/recomputes?roundId=1'],
+    ['POST',   '/admin/dzpp/recompute',     { roundId: 1, reason: 'an anonymous caller must never reach this' }],
     ['POST',   '/admin/challenge/scores',   { osuId: 1, score: 1 }],
     ['POST',   '/admin/rounds',             { roundNumber: 99 }],
     ['GET',    '/admin/submissions'],
@@ -260,6 +264,117 @@ console.log('\n--- the gate answers before the work, which is what makes it a ga
     headers: { cookie: `osudz_session=4907876.${Date.now() + 86400000}.0` },
   });
   ok('an unsigned session cookie is refused', refuses(unsigned, 401), `got ${unsigned.status}`);
+}
+
+console.log('--- the DZ Performance Rankings are public, and Algeria-only ---');
+{
+  const all = await call('/rankings');
+  ok('GET /rankings answers 200 with no session', all.status === 200, `got ${all.status}`);
+
+  const page = all.body ?? {};
+  ok(
+    'GET /rankings answers the paged envelope, not a bare array',
+    !Array.isArray(page) && Array.isArray(page.entries) &&
+      typeof page.page === 'number' && typeof page.pageSize === 'number' &&
+      typeof page.total === 'number' && Array.isArray(page.years),
+    JSON.stringify(page).slice(0, 200)
+  );
+  ok('GET /rankings defaults to the first page', page.page === 1, `got ${page.page}`);
+  ok('GET /rankings pages fifty to a page', page.pageSize === 50, `got ${page.pageSize}`);
+
+  // THE RULE OF THE WHOLE FEATURE. The filter runs in the query, so this is the assertion
+  // that it is actually there rather than merely intended.
+  const entries = Array.isArray(page.entries) ? page.entries : [];
+  const foreign = entries.filter((e) => e.country !== 'DZ').map((e) => e.country);
+  ok(
+    'no row in the ranking is from outside Algeria',
+    foreign.length === 0,
+    `saw ${[...new Set(foreign)].join(', ')}`
+  );
+
+  // Ordering and ranks. A plain sum descending, with ties sharing a rank.
+  const descending = entries.every((e, i) => i === 0 || entries[i - 1].dzpp >= e.dzpp);
+  ok('the ranking is ordered by DZPP descending', descending);
+  const ranksSane = entries.every(
+    (e, i) => i === 0 || (entries[i - 1].dzpp === e.dzpp ? e.rank === entries[i - 1].rank : e.rank > entries[i - 1].rank)
+  );
+  ok('players level on DZPP share a rank, and a lower total never outranks a higher one', ranksSane);
+  ok(
+    'every row carries the counts the page renders',
+    entries.every(
+      (e) =>
+        typeof e.dzpp === 'number' && typeof e.roundsPlayed === 'number' &&
+        typeof e.firstPlaces === 'number' &&
+        (e.bestPlacement === null || typeof e.bestPlacement === 'number')
+    )
+  );
+
+  // A year the community has not run is an empty table, not an error: the selector only
+  // offers years that hold points, but a hand-typed URL must still answer.
+  const empty = await call('/rankings?year=1999');
+  ok('GET /rankings for a year with no rounds answers 200 and an empty table',
+    empty.status === 200 && Array.isArray(empty.body?.entries) && empty.body.entries.length === 0,
+    `got ${empty.status}`);
+
+  // Past the end of the table. Empty page, real total.
+  const far = await call('/rankings?page=9999');
+  ok('a page past the end answers 200, empty, and still reports the total',
+    far.status === 200 && Array.isArray(far.body?.entries) && far.body.entries.length === 0 &&
+      far.body.total === page.total,
+    `got ${far.status}, total ${far.body?.total} vs ${page.total}`);
+
+  ok('GET /rankings accepts a four-digit year', (await call('/rankings?year=2026')).status === 200);
+
+  for (const bad of ['abc', '20261', '26', '-2026', '2026.0']) {
+    const r = await call(`/rankings?year=${encodeURIComponent(bad)}`);
+    ok(`GET /rankings?year=${bad} is refused as 400`, refuses(r, 400), `got ${r.status}`);
+  }
+  for (const bad of ['abc', '0', '-1', '1.5']) {
+    const r = await call(`/rankings?page=${encodeURIComponent(bad)}`);
+    ok(`GET /rankings?page=${bad} is refused as 400`, refuses(r, 400), `got ${r.status}`);
+  }
+
+  // The player history panel.
+  const history = await call('/rankings/1');
+  ok('GET /rankings/:userId answers 200 with an array', history.status === 200 && Array.isArray(history.body), `got ${history.status}`);
+
+  // 200 with [] rather than 404, so the endpoint cannot be used to discover which accounts
+  // exist — and so "no rounds yet" and "not in this ranking" read the same.
+  const unknown = await call('/rankings/99999999');
+  ok('an unknown player answers 200 with an empty history, not 404',
+    unknown.status === 200 && Array.isArray(unknown.body) && unknown.body.length === 0,
+    `got ${unknown.status}`);
+
+  ok('GET /rankings/:userId refuses a non-numeric id', refuses(await call('/rankings/abc'), 400));
+  ok('GET /rankings/:userId refuses a bad year', refuses(await call('/rankings/1?year=abc'), 400));
+
+  // Every frozen round carries its whole derivation, so the page can explain a total.
+  const rounds = Array.isArray(history.body) ? history.body : [];
+  ok(
+    'every frozen round carries its full breakdown',
+    rounds.every(
+      (r) =>
+        typeof r.completionPoints === 'number' && typeof r.qualificationPoints === 'number' &&
+        typeof r.placementPoints === 'number' && typeof r.fieldSize === 'number' &&
+        typeof r.finalDzpp === 'number' && typeof r.qualified === 'boolean' &&
+        (r.performanceValue === null || typeof r.performanceValue === 'number') &&
+        (r.placement === null || typeof r.placement === 'number')
+    ),
+    JSON.stringify(rounds[0] ?? null).slice(0, 200)
+  );
+
+  // A non-qualifying round earns no placement, and only qualified plays are placed. The two
+  // have to agree with each other on every row.
+  ok(
+    'no unqualified round carries a placement or placement points',
+    rounds.every((r) => r.qualified || (r.placement === null && r.placementPoints === 0))
+  );
+
+  // Writing is not part of this surface at all.
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+    const r = await call('/rankings', { method });
+    ok(`${method} /rankings is not a route`, refuses(r, 404), `got ${r.status}`);
+  }
 }
 
 console.log('');

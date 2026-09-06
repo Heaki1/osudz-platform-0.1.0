@@ -1,7 +1,7 @@
 import React from 'react';
 import { Phase, PlatformPage } from '../../types';
 import { CurrentRound, isBallotOpen, isPageOpen, useCountdown } from '../../lib/round';
-import { Home, Upload, Trophy, Search, Shield, LogOut, ChevronDown, Archive } from 'lucide-react';
+import { Home, Upload, Trophy, Search, Shield, LogOut, ChevronDown, Archive, BarChart2 } from 'lucide-react';
 
 export interface AuthUser {
   /** The osu!DZ account id, so a page can tell which leaderboard row is the caller's. */
@@ -58,6 +58,7 @@ const navItems: { key: PlatformPage; label: string; icon: React.ReactNode }[] = 
   { key: 'submit',    label: 'Submit',    icon: <Upload className="w-4 h-4" /> },
   { key: 'vote',      label: 'Vote',      icon: <Trophy className="w-4 h-4" /> },
   { key: 'search',    label: 'Search',    icon: <Search className="w-4 h-4" /> },
+  { key: 'rankings',  label: 'Rankings',  icon: <BarChart2 className="w-4 h-4" /> },
   { key: 'archive',   label: 'Archive',   icon: <Archive className="w-4 h-4" /> },
 ];
 
