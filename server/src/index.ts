@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import cors from 'cors';
@@ -16,7 +18,16 @@ import settingsRouter from './routes/settings.js';
 import commentsRouter from './routes/comments.js';
 
 const app = express();
-const PORT = parseInt(process.env.API_PORT ?? '3001', 10);
+// Render assigns the port to bind via PORT and marks the service failed if
+// nothing binds it within the health-check timeout. API_PORT is kept as the
+// local-dev override; never set both in production.
+const PORT = parseInt(process.env.PORT ?? process.env.API_PORT ?? '3001', 10);
+const isProduction = process.env.NODE_ENV === 'production';
+
+// Repo layout: <root>/dist (client build) and <root>/server/dist/index.js (this
+// file, compiled). So from dist/index.js, the client build is ../../dist.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const clientDistPath = path.resolve(__dirname, '../../dist');
 
 // One origin, with credentials. env.ts validates it and refuses to boot in production
 // without it, rather than silently allowing localhost on a deployed host.
@@ -37,6 +48,17 @@ app.use('/api/settings', settingsRouter);
 app.use('/api/comments', commentsRouter);
 app.use('/api/admin', adminRouter);
 
+// ── Static client (production only) ─────────────────────────────────────────
+//
+// In dev, Vite serves the client and proxies /api to this server. In
+// production there is no Vite dev server, so this process must serve the
+// built client itself. Client and API share one origin on purpose (see
+// env.ts / cors above) — that's what lets cookies stay sameSite: 'lax'
+// instead of 'none', which would need a CORS+cookie rewrite for no benefit.
+if (isProduction) {
+  app.use(express.static(clientDistPath));
+}
+
 // ── Fallbacks ────────────────────────────────────────────────────────────────
 //
 // Every route in this server answers { error: string } on failure, and
@@ -45,8 +67,17 @@ app.use('/api/admin', adminRouter);
 // 404, and a malformed JSON body was rejected by express.json() before any handler
 // ran, so that came back as HTML too. The client then reported "Request failed
 // (400)" with no idea why.
+//
+// /api/* paths that reach here are genuinely unmatched API routes and stay
+// JSON 404s. Everything else, in production, is a client-side route (e.g.
+// /rankings on a hard refresh) — serve index.html and let the SPA's router
+// handle it, rather than 404ing paths the client itself understands.
 
 app.use((req: Request, res: Response) => {
+  if (isProduction && !req.path.startsWith('/api/')) {
+    res.sendFile(path.join(clientDistPath, 'index.html'));
+    return;
+  }
   res.status(404).json({ error: `No API route for ${req.method} ${req.path}` });
 });
 
