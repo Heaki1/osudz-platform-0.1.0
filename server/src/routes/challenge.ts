@@ -180,6 +180,26 @@ router.post('/scores', requireCanChallenge, importLimit, async (req, res) => {
       return;
     }
 
+    // Only scores set during the challenge phase are valid. winner_approved_at is the
+    // exact moment the challenge opened — any play before that timestamp predates the
+    // challenge and cannot count, even if it was set on the same beatmap.
+    const challengeStartedAt = round.winner_approved_at;
+    if (!play.endedAt || !challengeStartedAt) {
+      res.status(422).json({
+        error: 'Your score has no timestamp and cannot be verified. Set a new score and try again.',
+      });
+      return;
+    }
+    if (new Date(play.endedAt) < challengeStartedAt) {
+      res.status(422).json({
+        error:
+          'This score was set before the challenge started. ' +
+          'Only scores set during the challenge phase count. ' +
+          'Set a new score on the beatmap and import it again.',
+      });
+      return;
+    }
+
     const row = await upsert({
       roundId: round.id,
       userId: req.user.id,
