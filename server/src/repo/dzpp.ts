@@ -15,6 +15,10 @@
 //   finalDzpp = round(performance + completion + qualification + placement)
 //   placement = basePlacementPoints(place) x fieldFactor(qualifiedPlayers)
 //
+// completion = CHALLENGE_SCORE_POINTS
+//            + (hadApprovedSubmission ? SUBMISSION_APPROVED_POINTS : 0)
+//            + (hadVote               ? VOTE_POINTS               : 0)
+//
 // There is deliberately no difficulty multiplier, no accuracy term, no full-combo bonus
 // and no winner bonus. osu! pp already prices star rating, accuracy, misses and combo,
 // and 1st place is already rewarded by the placement table.
@@ -31,10 +35,27 @@ import { listForRound } from './challengeScores.js';
  * round scored under version 1 stays explainable after version 2 exists — roadmap rule 7,
  * that historical DZPP must not silently change when a constant is retuned.
  */
-export const DZPP_FORMULA_VERSION = 1;
+export const DZPP_FORMULA_VERSION = 2;
 
-/** Awarded for having a challenge score at all, qualifying or not. */
-export const COMPLETION_POINTS = 10;
+/**
+ * Completion is now three independent sub-awards that together replace the old flat
+ * COMPLETION_POINTS = 10 constant.
+ *
+ * CHALLENGE_SCORE_POINTS — awarded unconditionally for having a challenge_scores row.
+ *   Submitting or importing a score during the challenge phase earns this, whether the
+ *   play met the requirements or not.
+ *
+ * SUBMISSION_APPROVED_POINTS — awarded when the player submitted a beatmap for the round
+ *   AND an administrator approved it.
+ *
+ * VOTE_POINTS — awarded when the player cast a vote for the round AND still held it when
+ *   the round ended (i.e. a votes row exists at finalization time).
+ *
+ * Maximum completion = 2 + 3 + 5 = 10, matching the old flat constant.
+ */
+export const CHALLENGE_SCORE_POINTS = 2;
+export const SUBMISSION_APPROVED_POINTS = 3;
+export const VOTE_POINTS = 5;
 
 /** Awarded on top when the play met the round's stored requirements. */
 export const QUALIFICATION_POINTS = 25;
@@ -112,6 +133,17 @@ export interface DzppScoreInput {
   placement: number | null;
   /** How many players qualified in the round — the field factor's input. */
   qualifiedPlayers: number;
+  /**
+   * True when this player submitted a beatmap for the round AND an administrator approved
+   * it. Earns SUBMISSION_APPROVED_POINTS. False when there was no submission or it was
+   * pending/rejected.
+   */
+  hadApprovedSubmission: boolean;
+  /**
+   * True when this player held a vote for the round at the moment the round was finalized.
+   * Earns VOTE_POINTS. A vote that was retracted before finalization does not count.
+   */
+  hadVote: boolean;
 }
 
 /**
@@ -150,12 +182,15 @@ const usablePerformance = (pp: number | null): number | null =>
 /**
  * Scores one play.
  *
- * COMPLETION IS UNCONDITIONAL HERE, and that is not a missing rule: this is only ever
- * called for a play that exists. A player with no challenge_scores row gets no breakdown
- * and no frozen row at all, which is the honest representation of not taking part and is
- * what keeps the ranking's rounds-played count right for free. One row per player per
- * round is guaranteed by challenge_scores_one_per_user_per_round, so attempts cannot
- * multiply the award.
+ * CHALLENGE_SCORE_POINTS IS UNCONDITIONAL HERE, and that is not a missing rule: this is
+ * only ever called for a play that exists. A player with no challenge_scores row gets no
+ * breakdown and no frozen row at all, which is the honest representation of not taking
+ * part and is what keeps the ranking's rounds-played count right for free. One row per
+ * player per round is guaranteed by challenge_scores_one_per_user_per_round, so attempts
+ * cannot multiply the award.
+ *
+ * SUBMISSION_APPROVED_POINTS and VOTE_POINTS are conditional on the facts the caller
+ * supplies. finalizeRound and recomputeRound query the database for these before scoring.
  *
  * A placement passed alongside qualified: false is dropped rather than honoured. Only
  * qualified players receive placement points, and a caller bug must not become points.
@@ -166,10 +201,14 @@ export function scoreOne(input: DzppScoreInput): DzppBreakdown {
   const placementAward =
     placement === null ? 0 : placementPoints(placement, input.qualifiedPlayers);
   const qualificationAward = input.qualified ? QUALIFICATION_POINTS : 0;
+  const completionPoints =
+    CHALLENGE_SCORE_POINTS +
+    (input.hadApprovedSubmission ? SUBMISSION_APPROVED_POINTS : 0) +
+    (input.hadVote ? VOTE_POINTS : 0);
 
   return {
     performanceValue,
-    completionPoints: COMPLETION_POINTS,
+    completionPoints,
     qualificationPoints: qualificationAward,
     placementPoints: placementAward,
     placement,
@@ -178,7 +217,7 @@ export function scoreOne(input: DzppScoreInput): DzppBreakdown {
     // Rounded once, at the end. Per round rather than per total, so the rows on a
     // player's detail panel sum exactly to the total on the leaderboard.
     finalDzpp: Math.round(
-      (performanceValue ?? 0) + COMPLETION_POINTS + qualificationAward + placementAward
+      (performanceValue ?? 0) + completionPoints + qualificationAward + placementAward
     ),
     formulaVersion: DZPP_FORMULA_VERSION,
   };
@@ -193,6 +232,10 @@ export interface DzppRoundPlay {
   pp: number | null;
   /** challenge_scores.qualified as stored. */
   qualified: boolean;
+  /** True when this player had an approved submission for the round. */
+  hadApprovedSubmission: boolean;
+  /** True when this player held a vote for the round at finalization time. */
+  hadVote: boolean;
 }
 
 /** A frozen result with the player it belongs to. */
@@ -238,6 +281,8 @@ export function scoreRound(playsInLeaderboardOrder: readonly DzppRoundPlay[]): D
       qualified: play.qualified,
       placement: play.qualified ? ++placed : null,
       qualifiedPlayers,
+      hadApprovedSubmission: play.hadApprovedSubmission,
+      hadVote: play.hadVote,
     }),
   }));
 }
@@ -263,13 +308,22 @@ const asPp = (value: string | null): number | null => {
  *
  * Structural rather than an import of ChallengeScoreRow, so the pure half stays a function
  * of plain data and the two modules do not need each other to be testable.
+ *
+ * hadApprovedSubmission and hadVote are supplied by the caller (finalizeRound /
+ * recomputeRound), which queries submissions and votes for the round before mapping.
  */
-export function toRoundPlay(row: {
-  user_id: number;
-  pp: string | null;
-  qualified: boolean;
-}): DzppRoundPlay {
-  return { userId: row.user_id, pp: asPp(row.pp), qualified: row.qualified };
+export function toRoundPlay(
+  row: { user_id: number; pp: string | null; qualified: boolean },
+  hadApprovedSubmission: boolean,
+  hadVote: boolean
+): DzppRoundPlay {
+  return {
+    userId: row.user_id,
+    pp: asPp(row.pp),
+    qualified: row.qualified,
+    hadApprovedSubmission,
+    hadVote,
+  };
 }
 
 // ── Freezing a round ─────────────────────────────────────────────────────────
@@ -325,6 +379,9 @@ export type FinalizeOutcome =
  * this round's challenge_scores is possible any more: POST /api/challenge/scores requires
  * phase === 'challenge', and POST /api/admin/challenge/scores goes through findCurrent(),
  * which never returns an ended round. The set being scored cannot move under the read.
+ *
+ * The same reasoning applies to the completion sub-award queries: submissions and votes for
+ * an ended round cannot change, so reading them on the pool outside the lock is safe.
  */
 export async function finalizeRound(roundId: number): Promise<FinalizeOutcome> {
   const client = await pool.connect();
@@ -365,7 +422,17 @@ export async function finalizeRound(roundId: number): Promise<FinalizeOutcome> {
       requirement = rows[0]?.challenge_requirement ?? '';
     }
 
-    const results = scoreRound((await listForRound(roundId, requirement)).map(toRoundPlay));
+    // Completion sub-awards: which players had an approved submission and which held a vote.
+    // Read on the pool (outside the transaction) for the same reason listForRound is: no
+    // write to this round's submissions or votes is possible once the round has ended.
+    const approvedSubmitters = await fetchApprovedSubmitters(roundId);
+    const voters = await fetchVoters(roundId);
+
+    const results = scoreRound(
+      (await listForRound(roundId, requirement)).map((row) =>
+        toRoundPlay(row, approvedSubmitters.has(row.user_id), voters.has(row.user_id))
+      )
+    );
 
     await insertRoundDzpp(client, roundId, results);
 
@@ -739,7 +806,15 @@ export async function recomputeRound(
       requirement = rows[0]?.challenge_requirement ?? '';
     }
 
-    const results = scoreRound((await listForRound(roundId, requirement)).map(toRoundPlay));
+    // Completion sub-awards: same logic as finalizeRound.
+    const approvedSubmitters = await fetchApprovedSubmitters(roundId);
+    const voters = await fetchVoters(roundId);
+
+    const results = scoreRound(
+      (await listForRound(roundId, requirement)).map((row) =>
+        toRoundPlay(row, approvedSubmitters.has(row.user_id), voters.has(row.user_id))
+      )
+    );
 
     // THIS round only. The WHERE clause is the whole guarantee that a recompute cannot reach
     // another month, so it is a single equality on the id the caller named.
@@ -794,6 +869,31 @@ export async function recomputeRound(
   } finally {
     client.release();
   }
+}
+
+// ── Completion sub-award helpers ─────────────────────────────────────────────
+//
+// Both read from the pool (not a transaction client) because they are called after the
+// round has ended, at which point no write to submissions or votes for this round is
+// possible. Using the pool avoids holding the transaction open across two extra round
+// trips while still reading a consistent snapshot of a table that cannot change.
+
+/** User ids that submitted an approved beatmap for the given round. */
+async function fetchApprovedSubmitters(roundId: number): Promise<Set<number>> {
+  const { rows } = await pool.query<{ user_id: number }>(
+    `SELECT user_id FROM submissions WHERE round_id = $1 AND status = 'approved'`,
+    [roundId]
+  );
+  return new Set(rows.map((r) => r.user_id));
+}
+
+/** User ids that held a vote for the given round at the time of the call. */
+async function fetchVoters(roundId: number): Promise<Set<number>> {
+  const { rows } = await pool.query<{ user_id: number }>(
+    `SELECT user_id FROM votes WHERE round_id = $1`,
+    [roundId]
+  );
+  return new Set(rows.map((r) => r.user_id));
 }
 
 /**
