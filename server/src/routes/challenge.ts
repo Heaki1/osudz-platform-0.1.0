@@ -84,8 +84,10 @@ router.get('/scores', async (req, res) => {
     // Provisional DZPP for the whole field, from the engine that will freeze it when the
     // round ends. rows is already in leaderboard order, which is exactly what scoreRound
     // needs — so the placements behind these numbers are the ones on screen.
+    // Provisional DZPP: the round is still open so submission/vote sub-awards are not
+    // queryable here. Both flags are false — the total is approximate by design.
     const provisional = new Map(
-      scoreRound(rows.map(toRoundPlay)).map((result) => [result.userId, result.finalDzpp])
+      scoreRound(rows.map((row) => toRoundPlay(row, false, false))).map((result) => [result.userId, result.finalDzpp])
     );
     res.json(
       rows.map((row, i) => toApiChallengeScore(row, i + 1, provisional.get(row.user_id) ?? null))
