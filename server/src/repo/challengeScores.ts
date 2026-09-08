@@ -57,9 +57,9 @@ const SELECT = `SELECT ${COLUMNS} FROM challenge_scores cs JOIN users u ON u.id 
 //
 // Only two of the round's requirements can be judged from a single play.
 //
-// The mod requirement is absolute: every required acronym has to be present. 'NM'
-// means no mods at all, which is why it is checked as an empty list rather than as an
-// acronym to look for.
+// The mod requirement has two special values:
+//   'FM' (Free Mods) — any combination of mods is allowed. Every play passes.
+//   All other values — every required acronym must be present in the play's mods.
 //
 // The challenge requirement splits. 'Full Combo' is absolute — this play either
 // dropped no combo or it did. The other three ('Top #1 Score', 'Best Accuracy',
@@ -94,15 +94,18 @@ export function qualifies(
   play: { mods: string; misses: number },
   requirement: { modRequirement: string; challengeRequirement: string }
 ): boolean {
-  const required = splitMods(requirement.modRequirement);
-  const played = splitMods(play.mods);
+  // FM (Free Mods): any combination of mods is allowed — always passes.
+  const modReq = requirement.modRequirement.trim().toUpperCase();
+  if (modReq !== 'FM') {
+    const required = splitMods(requirement.modRequirement);
+    const played = splitMods(play.mods);
+    const modsOk =
+      required.length === 0
+        ? played.length === 0
+        : required.every((acronym) => played.includes(acronym));
+    if (!modsOk) return false;
+  }
 
-  const modsOk =
-    required.length === 0
-      ? played.length === 0
-      : required.every((acronym) => played.includes(acronym));
-
-  if (!modsOk) return false;
   if (requirement.challengeRequirement === 'Full Combo') return play.misses === 0;
   return true;
 }

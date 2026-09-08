@@ -27,25 +27,30 @@ describe('splitMods', () => {
 describe('qualifies', () => {
   const play = (mods: string, misses = 0) => ({ mods, misses });
 
-  it('requires an empty mod list when the round asks for no mods', () => {
-    expect(qualifies(play('NM'), { modRequirement: 'NM', challengeRequirement: 'Top #1 Score' })).toBe(true);
-    expect(qualifies(play('HD'), { modRequirement: 'NM', challengeRequirement: 'Top #1 Score' })).toBe(false);
+  // FM (Free Mods): any combination of mods passes, including no mods at all.
+  it('always passes mod compliance when the requirement is FM', () => {
+    expect(qualifies(play('NM'),    { modRequirement: 'FM', challengeRequirement: 'Top #1 Score' })).toBe(true);
+    expect(qualifies(play('HD'),    { modRequirement: 'FM', challengeRequirement: 'Top #1 Score' })).toBe(true);
+    expect(qualifies(play('HDHR'), { modRequirement: 'FM', challengeRequirement: 'Top #1 Score' })).toBe(true);
+    expect(qualifies(play('DT'),    { modRequirement: 'FM', challengeRequirement: 'Top #1 Score' })).toBe(true);
+  });
+
+  it('FM still checks the challenge requirement (Full Combo)', () => {
+    expect(qualifies(play('HD', 0), { modRequirement: 'FM', challengeRequirement: 'Full Combo' })).toBe(true);
+    expect(qualifies(play('HD', 1), { modRequirement: 'FM', challengeRequirement: 'Full Combo' })).toBe(false);
   });
 
   it('requires every named mod, and tolerates extras beyond them', () => {
     expect(qualifies(play('HDHR'), { modRequirement: 'HD', challengeRequirement: 'Top #1 Score' })).toBe(true);
-    expect(qualifies(play('HD'), { modRequirement: 'HDHR', challengeRequirement: 'Top #1 Score' })).toBe(false);
+    expect(qualifies(play('HD'),   { modRequirement: 'HDHR', challengeRequirement: 'Top #1 Score' })).toBe(false);
     expect(qualifies(play('HRHD'), { modRequirement: 'HDHR', challengeRequirement: 'Top #1 Score' })).toBe(true);
   });
 
-  // 'Full Combo' is the only challenge requirement a single play can be judged against.
   it('checks a full combo by misses, the one absolute requirement', () => {
-    expect(qualifies(play('NM', 0), { modRequirement: 'NM', challengeRequirement: 'Full Combo' })).toBe(true);
-    expect(qualifies(play('NM', 1), { modRequirement: 'NM', challengeRequirement: 'Full Combo' })).toBe(false);
+    expect(qualifies(play('HD', 0), { modRequirement: 'HD', challengeRequirement: 'Full Combo' })).toBe(true);
+    expect(qualifies(play('HD', 1), { modRequirement: 'HD', challengeRequirement: 'Full Combo' })).toBe(false);
   });
 
-  // The other three are relative — decided by comparing every play in the round — so a
-  // play with the right mods counts, and the leaderboard's order settles who won.
   it('lets a play with the right mods count for the relative requirements', () => {
     for (const requirement of ['Top #1 Score', 'Best Accuracy', 'Lowest Miss Count']) {
       expect(

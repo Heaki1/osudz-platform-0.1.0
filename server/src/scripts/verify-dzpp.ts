@@ -169,7 +169,7 @@ try {
     );
 
     const expected = new Map(
-      scoreRound(plays.map((row) => toRoundPlay(row) as DzppRoundPlay)).map((r) => [r.userId, r])
+      scoreRound(plays.map((row) => toRoundPlay(row, false, false))).map((r) => [r.userId, r])
     );
 
     for (const row of frozen) {

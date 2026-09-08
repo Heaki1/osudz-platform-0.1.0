@@ -84,8 +84,10 @@ router.get('/scores', async (req, res) => {
     // Provisional DZPP for the whole field, from the engine that will freeze it when the
     // round ends. rows is already in leaderboard order, which is exactly what scoreRound
     // needs — so the placements behind these numbers are the ones on screen.
+    // Provisional DZPP: the round is still open so submission/vote sub-awards are not
+    // queryable here. Both flags are false — the total is approximate by design.
     const provisional = new Map(
-      scoreRound(rows.map(toRoundPlay)).map((result) => [result.userId, result.finalDzpp])
+      scoreRound(rows.map((row) => toRoundPlay(row, false, false))).map((result) => [result.userId, result.finalDzpp])
     );
     res.json(
       rows.map((row, i) => toApiChallengeScore(row, i + 1, provisional.get(row.user_id) ?? null))
@@ -175,6 +177,26 @@ router.post('/scores', requireCanChallenge, importLimit, async (req, res) => {
       }
       console.error('[challenge] osu! score fetch failed:', err instanceof Error ? err.message : err);
       res.status(503).json({ error: 'Could not reach the osu! API' });
+      return;
+    }
+
+    // Only scores set during the challenge phase are valid. winner_approved_at is the
+    // exact moment the challenge opened — any play before that timestamp predates the
+    // challenge and cannot count, even if it was set on the same beatmap.
+    const challengeStartedAt = round.winner_approved_at;
+    if (!play.endedAt || !challengeStartedAt) {
+      res.status(422).json({
+        error: 'Your score has no timestamp and cannot be verified. Set a new score and try again.',
+      });
+      return;
+    }
+    if (new Date(play.endedAt) < challengeStartedAt) {
+      res.status(422).json({
+        error:
+          'This score was set before the challenge started. ' +
+          'Only scores set during the challenge phase count. ' +
+          'Set a new score on the beatmap and import it again.',
+      });
       return;
     }
 

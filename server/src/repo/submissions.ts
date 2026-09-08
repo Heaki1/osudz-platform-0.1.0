@@ -28,7 +28,11 @@ export type ReviewDecision = (typeof REVIEW_DECISIONS)[number];
  * one in the admin tab is not only a settings change, and this is where to look to find out
  * why.
  */
-export const SEEDED_MODS = ['NM', 'HD', 'HR', 'DT', 'EZ', 'FL', 'HDHR', 'HDDT', 'HRDT'] as const;
+// NM (No Mod) has been replaced by FM (Free Mods). FM means any combination of mods
+// is allowed — a player using HD, HR, NM, or anything else passes mod compliance.
+// repo/challengeScores.ts qualifies() and repo/dzpp.ts splitModAcronyms() both treat
+// 'FM' as "always passes", so renaming this in the admin tab is not only a settings change.
+export const SEEDED_MODS = ['FM', 'HD', 'HR', 'DT', 'EZ', 'FL', 'HDHR', 'HDDT', 'HRDT'] as const;
 export const SEEDED_CHALLENGE_TYPES = [
   'Full Combo',
   'Top #1 Score',

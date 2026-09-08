@@ -15,9 +15,12 @@
 //   finalDzpp = round(performance + completion + qualification + placement)
 //   placement = basePlacementPoints(place) x fieldFactor(qualifiedPlayers)
 //
-// completion = CHALLENGE_SCORE_POINTS
-//            + (hadApprovedSubmission ? SUBMISSION_APPROVED_POINTS : 0)
-//            + (hadVote               ? VOTE_POINTS               : 0)
+// completion     = CHALLENGE_SCORE_POINTS
+//               + (hadApprovedSubmission ? SUBMISSION_APPROVED_POINTS : 0)
+//               + (hadVote               ? VOTE_POINTS               : 0)
+//
+// qualification  = (hadModCompliance         ? MOD_COMPLIANCE_POINTS          : 0)
+//               + (hadRequirementAchievement ? REQUIREMENT_ACHIEVEMENT_POINTS : 0)
 //
 // There is deliberately no difficulty multiplier, no accuracy term, no full-combo bonus
 // and no winner bonus. osu! pp already prices star rating, accuracy, misses and combo,
@@ -35,7 +38,7 @@ import { listForRound } from './challengeScores.js';
  * round scored under version 1 stays explainable after version 2 exists — roadmap rule 7,
  * that historical DZPP must not silently change when a constant is retuned.
  */
-export const DZPP_FORMULA_VERSION = 2;
+export const DZPP_FORMULA_VERSION = 3;
 
 /**
  * Completion is now three independent sub-awards that together replace the old flat
@@ -57,8 +60,27 @@ export const CHALLENGE_SCORE_POINTS = 2;
 export const SUBMISSION_APPROVED_POINTS = 3;
 export const VOTE_POINTS = 5;
 
-/** Awarded on top when the play met the round's stored requirements. */
-export const QUALIFICATION_POINTS = 25;
+/**
+ * Qualification Points are split into two independent sub-awards.
+ *
+ * MOD_COMPLIANCE_POINTS — awarded when the player used the required mod(s) for the round.
+ *   Checkable per play: every required acronym must be present (NM means no mods at all).
+ *
+ * REQUIREMENT_ACHIEVEMENT_POINTS — awarded to the winner(s) of the challenge metric:
+ *   Full Combo        -> every player with 0 misses
+ *   Top #1 Score      -> player(s) with the highest score among the qualified field
+ *   Best Accuracy     -> player(s) with the highest accuracy among the qualified field
+ *   Lowest Miss Count -> player(s) with the lowest miss count among the qualified field
+ *
+ * Ties share the award: all players at the top metric value receive +15.
+ *
+ * Placement Points still require FULL qualification (both mod + challenge requirement met,
+ * i.e. the existing `qualified` boolean). Partial qualification earns points but not placement.
+ *
+ * Maximum qualification = 10 + 15 = 25, matching the old flat constant.
+ */
+export const MOD_COMPLIANCE_POINTS = 10;
+export const REQUIREMENT_ACHIEVEMENT_POINTS = 15;
 
 /**
  * Base placement award, 1st place first. Ninth place and below earn nothing, which is the
@@ -144,6 +166,16 @@ export interface DzppScoreInput {
    * Earns VOTE_POINTS. A vote that was retracted before finalization does not count.
    */
   hadVote: boolean;
+  /**
+   * True when this player used the required mod(s) for the round.
+   * Earns MOD_COMPLIANCE_POINTS. Computed by scoreRound from mods vs modRequirement.
+   */
+  hadModCompliance: boolean;
+  /**
+   * True when this player achieved the top metric for the challenge requirement.
+   * Earns REQUIREMENT_ACHIEVEMENT_POINTS. Computed by scoreRound across the whole field.
+   */
+  hadRequirementAchievement: boolean;
 }
 
 /**
@@ -200,7 +232,9 @@ export function scoreOne(input: DzppScoreInput): DzppBreakdown {
   const placement = input.qualified ? input.placement : null;
   const placementAward =
     placement === null ? 0 : placementPoints(placement, input.qualifiedPlayers);
-  const qualificationAward = input.qualified ? QUALIFICATION_POINTS : 0;
+  const qualificationAward =
+    (input.hadModCompliance ? MOD_COMPLIANCE_POINTS : 0) +
+    (input.hadRequirementAchievement ? REQUIREMENT_ACHIEVEMENT_POINTS : 0);
   const completionPoints =
     CHALLENGE_SCORE_POINTS +
     (input.hadApprovedSubmission ? SUBMISSION_APPROVED_POINTS : 0) +
@@ -236,6 +270,18 @@ export interface DzppRoundPlay {
   hadApprovedSubmission: boolean;
   /** True when this player held a vote for the round at finalization time. */
   hadVote: boolean;
+  /** The mod string as stored ('HDHR', 'NM', etc.) — used to compute hadModCompliance. */
+  mods: string;
+  /** The round's mod requirement ('HD', 'NM', etc.) — used to compute hadModCompliance. */
+  modRequirement: string;
+  /** The round's challenge requirement ('Full Combo', 'Best Accuracy', etc.) */
+  challengeRequirement: string;
+  /** The player's score value — used to find the Top #1 Score metric winner. */
+  score: number;
+  /** The player's accuracy (0-100) — used to find the Best Accuracy metric winner. */
+  accuracy: number;
+  /** The player's miss count — used to find the Lowest Miss Count metric winner. */
+  misses: number;
 }
 
 /** A frozen result with the player it belongs to. */
@@ -273,18 +319,89 @@ export function scoreRound(playsInLeaderboardOrder: readonly DzppRoundPlay[]): D
   // to the ranking read, not to what happened in the round.
   const qualifiedPlayers = playsInLeaderboardOrder.filter((play) => play.qualified).length;
 
+  // ── Qualification sub-awards ──────────────────────────────────────────────
+  //
+  // MOD COMPLIANCE is per-play: every required acronym must be present.
+  // REQUIREMENT ACHIEVEMENT is per-round: find the metric winner(s) across the whole
+  // field before scoring any individual play.
+  const challengeRequirement = playsInLeaderboardOrder[0]?.challengeRequirement ?? '';
+  const qualifiedPlays = playsInLeaderboardOrder.filter((p) => p.qualified);
+
+  let achievementWinnerIds: Set<number>;
+  if (challengeRequirement === 'Full Combo') {
+    // Absolute: every player with 0 misses earns it, qualified or not.
+    achievementWinnerIds = new Set(
+      playsInLeaderboardOrder.filter((p) => p.misses === 0).map((p) => p.userId)
+    );
+  } else if (challengeRequirement === 'Best Accuracy') {
+    const best = qualifiedPlays.reduce<number | null>(
+      (max, p) => (max === null || p.accuracy > max ? p.accuracy : max), null
+    );
+    achievementWinnerIds = new Set(
+      best === null ? [] : qualifiedPlays.filter((p) => p.accuracy === best).map((p) => p.userId)
+    );
+  } else if (challengeRequirement === 'Lowest Miss Count') {
+    const best = qualifiedPlays.reduce<number | null>(
+      (min, p) => (min === null || p.misses < min ? p.misses : min), null
+    );
+    achievementWinnerIds = new Set(
+      best === null ? [] : qualifiedPlays.filter((p) => p.misses === best).map((p) => p.userId)
+    );
+  } else {
+    // 'Top #1 Score' and any future type: highest score among qualified plays.
+    const best = qualifiedPlays.reduce<number | null>(
+      (max, p) => (max === null || p.score > max ? p.score : max), null
+    );
+    achievementWinnerIds = new Set(
+      best === null ? [] : qualifiedPlays.filter((p) => p.score === best).map((p) => p.userId)
+    );
+  }
+
   let placed = 0;
-  return playsInLeaderboardOrder.map((play) => ({
-    userId: play.userId,
-    ...scoreOne({
-      pp: play.pp,
-      qualified: play.qualified,
-      placement: play.qualified ? ++placed : null,
-      qualifiedPlayers,
-      hadApprovedSubmission: play.hadApprovedSubmission,
-      hadVote: play.hadVote,
-    }),
-  }));
+  return playsInLeaderboardOrder.map((play) => {
+    // FM (Free Mods): any combination of mods is allowed — always compliant.
+    const isFm = play.modRequirement.trim().toUpperCase() === 'FM';
+    let hadModCompliance: boolean;
+    if (isFm) {
+      hadModCompliance = true;
+    } else {
+      const requiredAcronyms = splitModAcronyms(play.modRequirement);
+      const playedAcronyms = splitModAcronyms(play.mods);
+      hadModCompliance =
+        requiredAcronyms.length === 0
+          ? playedAcronyms.length === 0
+          : requiredAcronyms.every((a) => playedAcronyms.includes(a));
+    }
+
+    return {
+      userId: play.userId,
+      ...scoreOne({
+        pp: play.pp,
+        qualified: play.qualified,
+        placement: play.qualified ? ++placed : null,
+        qualifiedPlayers,
+        hadApprovedSubmission: play.hadApprovedSubmission,
+        hadVote: play.hadVote,
+        hadModCompliance,
+        hadRequirementAchievement: achievementWinnerIds.has(play.userId),
+      }),
+    };
+  });
+}
+
+/**
+ * Splits a mod string into acronyms, filtering ignored mods (e.g. 'CL').
+ * Mirrors the logic in repo/challengeScores.ts splitMods — kept here so the pure
+ * half of dzpp.ts has no import dependency on challengeScores.ts.
+ *
+ * NOTE: 'FM' (Free Mods) is handled BEFORE this function is called in scoreRound.
+ * FM always grants mod compliance and never reaches the acronym comparison.
+ */
+const IGNORED_MOD_ACRONYMS = ['CL'];
+function splitModAcronyms(mods: string): string[] {
+  const text = mods.trim().toUpperCase();
+  if (text === '' || text === 'NM') return [];
+  return (text.match(/.{1,2}/g) ?? []).filter((a) => !IGNORED_MOD_ACRONYMS.includes(a));
 }
 
 // ── Reading a stored challenge score ─────────────────────────────────────────
@@ -313,9 +430,19 @@ const asPp = (value: string | null): number | null => {
  * recomputeRound), which queries submissions and votes for the round before mapping.
  */
 export function toRoundPlay(
-  row: { user_id: number; pp: string | null; qualified: boolean },
+  row: {
+    user_id: number;
+    pp: string | null;
+    qualified: boolean;
+    mods: string;
+    score: string;
+    accuracy: string;
+    misses: number;
+  },
   hadApprovedSubmission: boolean,
-  hadVote: boolean
+  hadVote: boolean,
+  modRequirement: string,
+  challengeRequirement: string
 ): DzppRoundPlay {
   return {
     userId: row.user_id,
@@ -323,6 +450,12 @@ export function toRoundPlay(
     qualified: row.qualified,
     hadApprovedSubmission,
     hadVote,
+    mods: row.mods,
+    modRequirement,
+    challengeRequirement,
+    score: Number(row.score),
+    accuracy: Number(row.accuracy),
+    misses: row.misses,
   };
 }
 
@@ -414,12 +547,17 @@ export async function finalizeRound(roundId: number): Promise<FinalizeOutcome> {
     // archived without a recorded winner has none, and listForRound falls back to score
     // descending for exactly that case.
     let requirement = '';
+    let modRequirement = '';
     if (current.winning_submission_id !== null) {
-      const { rows } = await client.query<{ challenge_requirement: string }>(
-        'SELECT challenge_requirement FROM submissions WHERE id = $1',
+      const { rows } = await client.query<{
+        challenge_requirement: string;
+        mod_requirement: string;
+      }>(
+        'SELECT challenge_requirement, mod_requirement FROM submissions WHERE id = $1',
         [current.winning_submission_id]
       );
       requirement = rows[0]?.challenge_requirement ?? '';
+      modRequirement = rows[0]?.mod_requirement ?? '';
     }
 
     // Completion sub-awards: which players had an approved submission and which held a vote.
@@ -430,7 +568,13 @@ export async function finalizeRound(roundId: number): Promise<FinalizeOutcome> {
 
     const results = scoreRound(
       (await listForRound(roundId, requirement)).map((row) =>
-        toRoundPlay(row, approvedSubmitters.has(row.user_id), voters.has(row.user_id))
+        toRoundPlay(
+          row,
+          approvedSubmitters.has(row.user_id),
+          voters.has(row.user_id),
+          modRequirement,
+          requirement
+        )
       )
     );
 
@@ -798,12 +942,17 @@ export async function recomputeRound(
     const previous = before[0] ?? { row_count: 0, total: 0, version: null };
 
     let requirement = '';
+    let modRequirement = '';
     if (current.winning_submission_id !== null) {
-      const { rows } = await client.query<{ challenge_requirement: string }>(
-        'SELECT challenge_requirement FROM submissions WHERE id = $1',
+      const { rows } = await client.query<{
+        challenge_requirement: string;
+        mod_requirement: string;
+      }>(
+        'SELECT challenge_requirement, mod_requirement FROM submissions WHERE id = $1',
         [current.winning_submission_id]
       );
       requirement = rows[0]?.challenge_requirement ?? '';
+      modRequirement = rows[0]?.mod_requirement ?? '';
     }
 
     // Completion sub-awards: same logic as finalizeRound.
@@ -812,7 +961,13 @@ export async function recomputeRound(
 
     const results = scoreRound(
       (await listForRound(roundId, requirement)).map((row) =>
-        toRoundPlay(row, approvedSubmitters.has(row.user_id), voters.has(row.user_id))
+        toRoundPlay(
+          row,
+          approvedSubmitters.has(row.user_id),
+          voters.has(row.user_id),
+          modRequirement,
+          requirement
+        )
       )
     );
 
