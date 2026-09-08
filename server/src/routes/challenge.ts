@@ -87,7 +87,7 @@ router.get('/scores', async (req, res) => {
     // Provisional DZPP: the round is still open so submission/vote sub-awards are not
     // queryable here. Both flags are false — the total is approximate by design.
     const provisional = new Map(
-      scoreRound(rows.map((row) => toRoundPlay(row, false, false))).map((result) => [result.userId, result.finalDzpp])
+      scoreRound(rows.map((row) => toRoundPlay(row, false, false, '', context.winner?.challenge_requirement ?? ''))).map((result) => [result.userId, result.finalDzpp])
     );
     res.json(
       rows.map((row, i) => toApiChallengeScore(row, i + 1, provisional.get(row.user_id) ?? null))

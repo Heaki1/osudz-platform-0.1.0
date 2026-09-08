@@ -46,6 +46,6 @@ INSERT INTO site_settings (
 ) VALUES (
   1,
   ARRAY['ranked', 'loved', 'approved'],
-  ARRAY['FM', 'HD', 'HR', 'DT', 'EZ', 'FL', 'HDHR', 'HDDT', 'HRDT'],
+  ARRAY['NM', 'HD', 'HR', 'DT', 'EZ', 'FL', 'HDHR', 'HDDT', 'HRDT'],
   ARRAY['Full Combo', 'Top #1 Score', 'Best Accuracy', 'Lowest Miss Count']
 );
