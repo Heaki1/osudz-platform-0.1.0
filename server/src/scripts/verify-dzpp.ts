@@ -160,14 +160,22 @@ try {
 
     // The same SELECT and the same ORDER BY listForRound issues, so the placements re-derived
     // here are the ones the leaderboard showed.
-    const { rows: plays } = await pool.query<{ user_id: number; pp: string | null; qualified: boolean }>(
-      `SELECT cs.user_id, cs.pp, cs.qualified
+     const { rows: plays } = await pool.query<{
+      user_id: number;
+      pp: string | null;
+      qualified: boolean;
+      mods: string;
+      score: string;
+      accuracy: string;
+      misses: number;
+    }>(
+      `SELECT cs.user_id, cs.pp, cs.qualified,
+              cs.mods, cs.score, cs.accuracy, cs.misses
          FROM challenge_scores cs
         WHERE cs.round_id = $1
         ORDER BY cs.qualified DESC, ${orderFor(requirement)}, cs.submitted_at ASC`,
       [round.id]
     );
-
     const expected = new Map(
       scoreRound(plays.map((row) => toRoundPlay(row, false, false, '', requirement))).map((r) => [r.userId, r])
     );

@@ -335,9 +335,10 @@ describe('scoreRound', () => {
   });
 
   it('scores a round where nobody qualified as completion alone', () => {
-    // completion=2, qualification=0; 200+2=202, 150+2=152
+    // completion=2, mod compliance=10, requirement achievement=0;
+    // 200+2+10=212, 150+2+10=162
     const rows = scoreRound([nq(1, 200), nq(2, 150)]);
-    expect(dzpp(rows)).toEqual([202, 152]);
+    expect(dzpp(rows)).toEqual([212, 162]);
     expect(rows.every((row) => row.fieldSize === 0)).toBe(true);
     expect(rows.every((row) => row.placementPoints === 0)).toBe(true);
   });
@@ -365,7 +366,7 @@ describe('scoreRound', () => {
     expect(rows[2].qualificationPoints).toBe(10);
     // nq: NM mods, NM req => mod compliance=10, not qualified so no achievement
     expect(rows[3].qualificationPoints).toBe(10);
-    expect(dzpp(rows)).toEqual([232, 198, 166, 279]);
+    expect(dzpp(rows)).toEqual([232, 198, 166, 281]);
   });
 
   // Full Combo: every player with 0 misses earns achievement, qualified or not.
@@ -482,8 +483,9 @@ describe('scoreRound', () => {
 
 // ── The remaining field sizes the roadmap asks for ───────────────────────────
 //
-// NM/NM/Top #1 Score so all players get full qualification (25).
-// Scores are descending so player 1 always wins achievement.
+// NM/NM/Top #1 Score.
+// All players get mod compliance (+10); only the top qualified scorer
+// gets requirement achievement (+15).
 
 describe('scoreRound across every field size the roadmap names', () => {
   const q = (userId: number, pp: number | null, score: number): DzppRoundPlay =>
@@ -492,8 +494,9 @@ describe('scoreRound across every field size the roadmap names', () => {
   it('pays a quarter of the table to a field of two', () => {
     const rows = scoreRound([q(1, 150, 200), q(2, 140, 100)]);
     expect(rows.map((row) => row.placementPoints)).toEqual([12.5, 10]);
-    // p1: 150+2+25+12.5=189.5=>190, p2: 140+2+25+10=177
-    expect(rows.map((row) => row.finalDzpp)).toEqual([190, 177]);
+    // p1: 150+2+25+12.5=189.5=>190
+    // p2: 140+2+10+10=162
+    expect(rows.map((row) => row.finalDzpp)).toEqual([190, 162]);
   });
 
   it('pays half the table to a field of four', () => {
