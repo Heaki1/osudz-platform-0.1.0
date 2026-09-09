@@ -1,0 +1,10 @@
+# server/src/scripts/migrate.ts checksums each migration by hashing the bytes it reads
+# off disk, and refuses to run when an already-applied file hashes differently — the
+# check that catches a migration being edited after the fact.
+#
+# core.autocrlf is true here, so without this line a fresh clone would check the .sql
+# files out as CRLF, all eleven applied migrations would hash differently, and the runner
+# would hard-fail with "the database no longer matches the files" over line endings
+# alone. Pinning them to LF makes the checksum mean what it is supposed to mean: the
+# content changed, not the checkout did.
+*.sql text eol=lf
