@@ -41,7 +41,10 @@ export function toBeatmapComment(comment: ApiComment, now?: number): BeatmapComm
     avatar: comment.avatarUrl,
     time: relativeTime(comment.createdAt, now),
     text: comment.body,
+<<<<<<< HEAD
     parentId: comment.parentId !== null ? String(comment.parentId) : undefined,
+=======
+>>>>>>> origin/main
   };
 }
 

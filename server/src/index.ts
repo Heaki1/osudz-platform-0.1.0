@@ -16,7 +16,10 @@ import searchRouter from './routes/search.js';
 import favoritesRouter from './routes/favorites.js';
 import settingsRouter from './routes/settings.js';
 import commentsRouter from './routes/comments.js';
+<<<<<<< HEAD
 import challengeChatRouter from './routes/challengeChat.js';
+=======
+>>>>>>> origin/main
 
 const app = express();
 // Render assigns the port to bind via PORT and marks the service failed if
@@ -47,7 +50,10 @@ app.use('/api/search', searchRouter);
 app.use('/api/favorites', favoritesRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/comments', commentsRouter);
+<<<<<<< HEAD
 app.use('/api/challenge/chat', challengeChatRouter);
+=======
+>>>>>>> origin/main
 app.use('/api/admin', adminRouter);
 
 // ── Static client (production only) ─────────────────────────────────────────
