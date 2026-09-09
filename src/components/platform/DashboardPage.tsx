@@ -6,10 +6,7 @@ import { beatmapUrl, REVIEW_PRESENTATION, toBeatmap } from '../../lib/submission
 import { BeatmapCardPlatform } from './BeatmapCardPlatform';
 import { WithdrawButton } from './WithdrawButton';
 import { AuthUser } from './NavHeader';
-<<<<<<< HEAD
 import { ChallengeChat } from './ChallengeChat';
-=======
->>>>>>> origin/main
 import {
   Trophy, Crown, Upload, ChevronRight, RefreshCw,
   CheckCircle2, AlertCircle, Clock, LogIn, X, Ban, Heart, Info, Link as LinkIcon,
@@ -1228,7 +1225,6 @@ export function DashboardPage({
               />
             </div>
           </div>
-<<<<<<< HEAD
 
           {/* Live chat — challenge phase only, never archived */}
           <section>
@@ -1241,8 +1237,6 @@ export function DashboardPage({
             </div>
             <ChallengeChat user={user} onLogin={onLogin} />
           </section>
-=======
->>>>>>> origin/main
         </div>
       )}
     </div>

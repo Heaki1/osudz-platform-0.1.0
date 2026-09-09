@@ -488,7 +488,6 @@ export interface ApiResultCorrection {
 }
 
 /**
-<<<<<<< HEAD
  * One message in the challenge-phase live chat.
  *
  * Scoped to one round. Never archived. Admins can delete any message.
@@ -506,8 +505,6 @@ export interface ApiChatMessage {
 }
 
 /**
-=======
->>>>>>> origin/main
  * One comment on a submission (B8).
  *
  * parentId is the comment being replied to, or null for a top-level one. The panel renders a
@@ -719,7 +716,6 @@ export const api = {
       send<{ ok: boolean; imported: number; favorites: ApiFavorite[] }>("POST", "/favorites/import"),
   },
 
-<<<<<<< HEAD
   // ── Challenge chat ─────────────────────────────────────────────────────────
   //
   // Visible only during the challenge phase. Never archived.
@@ -732,8 +728,6 @@ export const api = {
       send<{ ok: boolean; message: ApiChatMessage }>('POST', '/challenge/chat', { body }),
   },
 
-=======
->>>>>>> origin/main
   // ── Comments ───────────────────────────────────────────────────────────────
   comments: {
     /**
@@ -891,12 +885,9 @@ export const api = {
       get<ApiVoteAudit[]>(roundId === undefined ? "/admin/votes" : `/admin/votes?roundId=${roundId}`),
     /** Submission ids a tied round may be resolved to. */
     tiebreakEntries: () => get<number[]>("/admin/round/tiebreak"),
-<<<<<<< HEAD
     /** Deletes a challenge chat message. Admin only. */
     deleteChatMessage: (id: number) =>
       send<{ ok: boolean }>('DELETE', `/challenge/chat/${id}`),
-=======
->>>>>>> origin/main
     /**
      * Records or overrides a challenge score by hand, for a play the osu! API will
      * not give up or a correction. The player is named by osu! id.

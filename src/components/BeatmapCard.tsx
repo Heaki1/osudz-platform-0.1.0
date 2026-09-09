@@ -2,7 +2,6 @@ import React, { useRef, useState } from 'react';
 import { Beatmap, BeatmapComment } from '../types';
 import {
   Star, Play, Pause, MessageSquare, Heart,
-<<<<<<< HEAD
   CheckCircle2, Trophy, Crown, Target, Flame, Medal,
   CornerDownRight, Send, X,
 } from 'lucide-react';
@@ -80,12 +79,6 @@ const ratingColors = [
   'text-rose-400', 'text-amber-400', 'text-yellow-300', 'text-emerald-400', 'text-cyan-400',
 ];
 
-=======
-  CheckCircle2, Trophy,
-  CornerDownRight, Send, X,
-} from 'lucide-react';
-
->>>>>>> origin/main
 interface BeatmapCardProps {
   beatmap: Beatmap;
   isPlaying: boolean;
@@ -119,13 +112,6 @@ interface BeatmapCardProps {
   showVoteButton?: boolean;
 }
 
-<<<<<<< HEAD
-=======
-const ratingColors = [
-  'text-rose-400', 'text-amber-400', 'text-yellow-300', 'text-emerald-400', 'text-cyan-400',
-];
-
->>>>>>> origin/main
 export const BeatmapCard: React.FC<BeatmapCardProps> = ({
   beatmap, isPlaying, audioProgress,
   onTogglePlay, onScrubAudio, onVote, onFavorite,
@@ -143,7 +129,6 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
 
   // From the server, through the page that fetched it. Never a local copy — that was the bug.
   const localComments: BeatmapComment[] = beatmap.comments ?? [];
-<<<<<<< HEAD
   // Top-level comments only; replies are rendered nested under their parent.
   const topLevel = localComments.filter((c) => !c.parentId);
   const spinRef = useRef<(() => void) | null>(null);
@@ -153,13 +138,6 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
   const challengeStyle =
     (beatmap.challengeType ? CHALLENGE_STYLES[beatmap.challengeType] : undefined)
     ?? FALLBACK_CHALLENGE_STYLE;
-=======
-  const spinRef = useRef<(() => void) | null>(null);
-
-  const isHighDifficulty = beatmap.stars >= 4.2;
-  const headerBgClass = isHighDifficulty ? 'bg-rose-500 text-white' : 'bg-amber-400 text-slate-950';
-  const barFillColor = isHighDifficulty ? 'bg-rose-400' : 'bg-amber-400';
->>>>>>> origin/main
 
   const formatTime = (ratio: number, total: number) => {
     const s = Math.floor(ratio * total);
@@ -233,19 +211,9 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
         {/* ── FRONT FACE ── */}
         <div className="card-face bg-[#0f172a] border border-slate-700/80 rounded-2xl overflow-hidden shadow-lg hover:shadow-2xl hover:border-slate-500/90 transition-shadow duration-300 flex flex-col text-slate-100 group">
 
-<<<<<<< HEAD
           {/* Star Rating Banner — fractional StarRow + 6-band colour scheme */}
           <div className={`w-full py-1 px-3 flex items-center justify-between font-bold text-xs tracking-wider select-none flex-shrink-0 ${headerBgClass}`}>
             <StarRow rating={beatmap.stars} />
-=======
-          {/* Star Rating Banner */}
-          <div className={`w-full py-1.5 px-3 flex items-center justify-between font-bold text-xs tracking-wider select-none flex-shrink-0 ${headerBgClass}`}>
-            <div className="flex items-center gap-1">
-              {Array.from({ length: Math.min(5, Math.ceil(beatmap.stars)) }).map((_, i) => (
-                <Star key={i} className="w-3.5 h-3.5 fill-current stroke-current" />
-              ))}
-            </div>
->>>>>>> origin/main
             <span className="font-mono font-black text-sm tracking-tight">{beatmap.stars.toFixed(2)}</span>
           </div>
 
@@ -389,16 +357,11 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
                 <p className="text-[10px] text-rose-400/90 mb-1.5">{commentError}</p>
               )}
 
-<<<<<<< HEAD
               {/* Comment list — top-level with replies nested underneath */}
-=======
-              {/* Comment list */}
->>>>>>> origin/main
               <div className="flex-1 overflow-y-auto space-y-2 pb-2 pr-0.5" style={{ scrollbarWidth: 'thin' }}>
                 {localComments.length === 0 && (
                   <p className="text-xs text-slate-600 text-center py-4">No comments yet. Be the first!</p>
                 )}
-<<<<<<< HEAD
                 {topLevel.map((c) => {
                   const replies = localComments.filter((r) => r.parentId === c.id);
                   return (
@@ -501,65 +464,6 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
                     </div>
                   );
                 })}
-=======
-                {localComments.map((c) => (
-                  <div key={c.id} className="bg-slate-900/70 border border-slate-800 rounded-xl p-2.5">
-                    <div className="flex items-start justify-between gap-2 mb-1">
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-5 h-5 rounded-full bg-slate-700 border border-slate-600 flex items-center justify-center text-[9px] font-bold text-slate-300 uppercase flex-shrink-0">
-                          {c.user[0]}
-                        </div>
-                        <span className="text-[11px] font-bold text-slate-200">{c.user}</span>
-                        <span className="text-[10px] text-slate-600">{c.time}</span>
-                      </div>
-                      {c.rating != null && (
-                        <span className={`text-[10px] font-mono font-bold ${ratingColors[(c.rating - 1) % ratingColors.length]}`}>
-                          ★{c.rating}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-slate-300 leading-snug">{c.text}</p>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setReplyingTo(replyingTo === c.id ? null : c.id);
-                        setReplyText('');
-                      }}
-                      className="mt-1.5 flex items-center gap-1 text-[10px] text-slate-500 hover:text-amber-400 transition-colors"
-                    >
-                      <CornerDownRight className="w-3 h-3" />
-                      Reply
-                    </button>
-
-                    {/* Inline reply input */}
-                    {replyingTo === c.id && (
-                      <div
-                        className="mt-2 flex gap-1.5 pl-3 border-l-2 border-slate-700"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <input
-                          autoFocus
-                          type="text"
-                          value={replyText}
-                          onChange={(e) => setReplyText(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') void handleSubmitReply(c.id); }}
-                          placeholder={`Reply to ${localComments.find((x) => x.id === c.id)?.user ?? 'user'}…`}
-                          className="flex-1 bg-slate-950/60 border border-slate-800 rounded-md px-2 py-1 text-[10px] text-slate-300 placeholder-slate-600 focus:outline-none focus:border-slate-600"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => void handleSubmitReply(c.id)}
-                          disabled={commentBusy}
-                          className="p-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
-                        >
-                          <Send className="w-2.5 h-2.5" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
->>>>>>> origin/main
               </div>
 
               {/* New comment input */}
@@ -641,7 +545,6 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
         </div>
 
         {/* ── BACK FACE ── */}
-<<<<<<< HEAD
 <div className="card-face card-face-back bg-[#0f172a] border border-slate-700/80 rounded-2xl overflow-hidden shadow-lg flex flex-col text-slate-100">
 
   {/* Header */}
@@ -844,93 +747,6 @@ export const BeatmapCard: React.FC<BeatmapCardProps> = ({
 
 </div>
       </div>
-=======
-        <div className="card-face card-face-back bg-[#0f172a] border border-slate-700/80 rounded-2xl overflow-hidden shadow-lg flex flex-col text-slate-100">
-          <div className={`w-full py-2 px-3 flex items-center justify-between font-bold text-xs tracking-wider select-none flex-shrink-0 ${headerBgClass}`}>
-            <span className="font-mono font-black">SUBMISSION DETAILS</span>
-            <Trophy className="w-4 h-4" />
-          </div>
-
-          <div className="relative h-16 overflow-hidden flex-shrink-0">
-            <img src={beatmap.coverUrl} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover opacity-30" />
-            <div className="absolute inset-0 bg-gradient-to-r from-[#0f172a] via-[#0f172a]/60 to-[#0f172a]" />
-            <div className="absolute inset-0 p-3 flex flex-col justify-center">
-              <p className="text-sm font-black text-white line-clamp-1">{beatmap.title}</p>
-              <p className="text-[11px] text-slate-400">{beatmap.artist} · mapped by {beatmap.mapper}</p>
-              <p className="text-[10px] text-amber-400 font-mono mt-0.5 font-bold">
-                ★ {beatmap.stars.toFixed(2)} · {beatmap.difficultyName}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-            <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">
-              Challenge requirements
-            </p>
-
-            <div className="bg-slate-900/70 border border-slate-800 rounded-xl divide-y divide-slate-800/60">
-              {[
-                { label: 'Mod requirement', value: beatmap.modRequirement, mono: true },
-                { label: 'Challenge type', value: beatmap.challengeType, mono: false },
-                { label: 'Submitted by', value: beatmap.submittedByName, mono: false },
-                { label: 'Map status', value: beatmap.status, mono: false },
-              ].map(({ label, value, mono }) => (
-                <div key={label} className="flex items-center justify-between gap-3 px-3 py-2.5">
-                  <span className="text-[11px] text-slate-500">{label}</span>
-                  <span
-                    className={`text-[11px] font-bold text-slate-100 text-right ${mono ? 'font-mono' : ''} ${
-                      value ? '' : 'text-slate-600'
-                    }`}
-                  >
-                    {value || '—'}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {beatmap.description && (
-              <p className="text-[11px] text-slate-400 leading-snug px-1">{beatmap.description}</p>
-            )}
-          </div>
-
-          <div className="p-3 border-t border-slate-800 flex gap-2 flex-shrink-0">
-            {showVoteButton && (
-            <button
-              type="button"
-              disabled={voteBlocked}
-              title={voteTitle}
-              aria-label={voteTitle}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (voteBlocked) return;
-                triggerSpin(onVote);
-              }}
-              className={`flex-1 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 disabled:opacity-30 disabled:cursor-not-allowed ${
-                beatmap.isVoted ? 'bg-emerald-600 text-white' : 'bg-amber-400 hover:bg-amber-300 text-slate-950'
-              }`}
-            >
-              {voteBusy
-                ? 'Voting…'
-                : beatmap.isVoted
-                  ? <><CheckCircle2 className="w-3.5 h-3.5" /> Voted</>
-                  : 'Vote'}
-            </button>
-            )}
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); triggerSpin(onFavorite); }}
-              className={`px-3 py-2 rounded-lg border text-xs font-bold transition-colors ${
-                beatmap.isFavorited
-                  ? 'bg-rose-500/20 border-rose-500/60 text-rose-400'
-                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
-              }`}
-            >
-              <Heart className={`w-3.5 h-3.5 ${beatmap.isFavorited ? 'fill-rose-500' : ''}`} />
-            </button>
-          </div>
-        </div>
-      </div>
->>>>>>> origin/main
     </div>
   );
 };
